@@ -1,0 +1,82 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: Zoolanding Image Upload Presign Lambda - SAM Template
+
+Parameters:
+  PublicFilesBucketName:
+    Type: String
+    Default: zoolandingpage-public-files
+    Description: S3 bucket that stores public image assets.
+  PublicFilesBaseUrl:
+    Type: String
+    Default: https://assets.zoolandingpage.com.mx
+    Description: CDN or custom origin base URL for public asset links.
+  PresignExpirationSeconds:
+    Type: String
+    Default: '900'
+    Description: Presigned upload URL lifetime in seconds.
+  LogLevel:
+    Type: String
+    Default: INFO
+    AllowedValues: [DEBUG, INFO, WARNING, ERROR]
+    Description: Log level for the Lambda.
+
+Globals:
+  Function:
+    Runtime: python3.13
+    Timeout: 10
+    MemorySize: 256
+    Tracing: PassThrough
+
+Resources:
+  ImageUploadApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: Prod
+      Cors:
+        AllowOrigin: "'*'"
+        AllowHeaders: "'Content-Type,Authorization'"
+        AllowMethods: "'POST,OPTIONS'"
+
+  ImageUploadFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: .
+      Handler: lambda_function.lambda_handler
+      Description: Issues presigned upload URLs for public image assets.
+      Environment:
+        Variables:
+          PUBLIC_FILES_BUCKET_NAME:
+            Ref: PublicFilesBucketName
+          PUBLIC_FILES_BASE_URL:
+            Ref: PublicFilesBaseUrl
+          PRESIGN_EXPIRATION_SECONDS:
+            Ref: PresignExpirationSeconds
+          LOG_LEVEL:
+            Ref: LogLevel
+      Policies:
+        - Version: '2012-10-17'
+          Statement:
+            - Effect: Allow
+              Action:
+                - s3:PutObject
+              Resource:
+                Fn::Sub: arn:aws:s3:::${PublicFilesBucketName}/*
+      Events:
+        ImageUploadPost:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: ImageUploadApi
+            Path: /image-upload/presign
+            Method: POST
+
+Outputs:
+  ApiUrl:
+    Description: Image upload presign endpoint URL.
+    Value:
+      Fn::Sub: https://${ImageUploadApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/image-upload/presign
+  FunctionName:
+    Description: Deployed Lambda function name.
+    Value:
+      Ref: ImageUploadFunction

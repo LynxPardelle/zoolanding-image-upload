@@ -1,0 +1,15 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "zoolanding-image-upload"
+resolve_s3 = true
+s3_prefix = "zoolanding-image-upload"
+region = "us-east-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+  "PublicFilesBucketName=zoolandingpage-public-files",
+  "PublicFilesBaseUrl=https://assets.zoolandingpage.com.mx",
+  "PresignExpirationSeconds=900",
+  "LogLevel=INFO"
+]
