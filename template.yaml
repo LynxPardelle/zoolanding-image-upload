@@ -24,8 +24,8 @@ Parameters:
 Globals:
   Function:
     Runtime: python3.13
-    Timeout: 10
-    MemorySize: 256
+    Timeout: 30
+    MemorySize: 512
     Tracing: PassThrough
 
 Resources:
@@ -52,6 +52,11 @@ Resources:
             Ref: PublicFilesBaseUrl
           PRESIGN_EXPIRATION_SECONDS:
             Ref: PresignExpirationSeconds
+          DEFAULT_IMAGE_MAX_WIDTH: '2048'
+          DEFAULT_IMAGE_MAX_HEIGHT: '2048'
+          JPEG_QUALITY: '82'
+          WEBP_QUALITY: '80'
+          PNG_COMPRESS_LEVEL: '9'
           LOG_LEVEL:
             Ref: LogLevel
       Policies:
