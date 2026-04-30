@@ -15,6 +15,10 @@ Parameters:
     Type: String
     Default: '900'
     Description: Presigned upload URL lifetime in seconds.
+  PublicFileCacheControl:
+    Type: String
+    Default: public, max-age=31536000, immutable
+    Description: Cache-Control header applied to public uploaded assets.
   LogLevel:
     Type: String
     Default: INFO
@@ -52,6 +56,8 @@ Resources:
             Ref: PublicFilesBaseUrl
           PRESIGN_EXPIRATION_SECONDS:
             Ref: PresignExpirationSeconds
+          PUBLIC_FILE_CACHE_CONTROL:
+            Ref: PublicFileCacheControl
           DEFAULT_IMAGE_MAX_WIDTH: '2048'
           DEFAULT_IMAGE_MAX_HEIGHT: '2048'
           JPEG_QUALITY: '82'

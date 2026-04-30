@@ -33,6 +33,7 @@ PUBLIC_FILES_BASE_URL = os.getenv("PUBLIC_FILES_BASE_URL", "")
 PRESIGN_EXPIRATION_SECONDS = int(os.getenv("PRESIGN_EXPIRATION_SECONDS", "900"))
 DEFAULT_IMAGE_MAX_WIDTH = int(os.getenv("DEFAULT_IMAGE_MAX_WIDTH", "2048"))
 DEFAULT_IMAGE_MAX_HEIGHT = int(os.getenv("DEFAULT_IMAGE_MAX_HEIGHT", "2048"))
+PUBLIC_FILE_CACHE_CONTROL = os.getenv("PUBLIC_FILE_CACHE_CONTROL", "public, max-age=31536000, immutable")
 JPEG_QUALITY = int(os.getenv("JPEG_QUALITY", "82"))
 WEBP_QUALITY = int(os.getenv("WEBP_QUALITY", "80"))
 PNG_COMPRESS_LEVEL = int(os.getenv("PNG_COMPRESS_LEVEL", "9"))
@@ -260,7 +261,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "uploadUrl": f"https://example.invalid/presigned/{key}",
             "publicUrl": _public_url(key),
             "expiresIn": PRESIGN_EXPIRATION_SECONDS,
-            "headers": {"Content-Type": content_type},
+            "headers": {"Content-Type": content_type, "Cache-Control": PUBLIC_FILE_CACHE_CONTROL},
             "uploadStrategy": "presigned-put",
         })
 
@@ -271,6 +272,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
                 "Bucket": PUBLIC_FILES_BUCKET_NAME,
                 "Key": key,
                 "ContentType": content_type,
+                "CacheControl": PUBLIC_FILE_CACHE_CONTROL,
             },
             ExpiresIn=PRESIGN_EXPIRATION_SECONDS,
         )
@@ -281,7 +283,7 @@ def lambda_handler(event: Dict[str, Any], context: Any) -> Dict[str, Any]:
             "uploadUrl": upload_url,
             "publicUrl": _public_url(key),
             "expiresIn": PRESIGN_EXPIRATION_SECONDS,
-            "headers": {"Content-Type": content_type},
+            "headers": {"Content-Type": content_type, "Cache-Control": PUBLIC_FILE_CACHE_CONTROL},
             "uploadStrategy": "presigned-put",
         })
     except Exception as exc:

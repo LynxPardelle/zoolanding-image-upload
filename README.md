@@ -21,6 +21,7 @@ This Lambda issues presigned S3 upload URLs for public image assets used by a si
 - `PUBLIC_FILES_BUCKET_NAME`
 - `PUBLIC_FILES_BASE_URL`
 - `PRESIGN_EXPIRATION_SECONDS`
+- `PUBLIC_FILE_CACHE_CONTROL`
 - `DEFAULT_IMAGE_MAX_WIDTH`
 - `DEFAULT_IMAGE_MAX_HEIGHT`
 - `JPEG_QUALITY`
@@ -62,7 +63,7 @@ curl -X POST "https://your-api-id.execute-api.us-east-1.amazonaws.com/Prod/image
   -d '{"domain":"test.zoolandingpage.com.mx","pageId":"default","assetKind":"hero-images","assetId":"headline-art","fileName":"headline-art.png","contentType":"image/png"}'
 ```
 
-Use the returned `uploadUrl` with a `PUT` request and the returned `Content-Type` header value.
+Use the returned `uploadUrl` with a `PUT` request and every returned header value. The presigned flow includes `Content-Type` and `Cache-Control`, and the `PUT` must send both headers because they are part of the signature.
 
 Direct upload with compression on the same endpoint:
 
