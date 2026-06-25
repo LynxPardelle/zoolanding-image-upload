@@ -15,15 +15,73 @@ Parameters:
     Type: String
     Default: '900'
     Description: Presigned upload URL lifetime in seconds.
+  UploadGrantsTableName:
+    Type: String
+    Default: zoolanding-image-upload-grants
+    Description: DynamoDB table used to validate temporary upload grants.
+  UploadGrantDefaultExpiresSeconds:
+    Type: String
+    Default: '28800'
+    Description: Default upload grant lifetime in seconds.
+  UploadGrantMaxExpiresSeconds:
+    Type: String
+    Default: '86400'
+    Description: Maximum upload grant lifetime in seconds.
+  UploadGrantDefaultMaxBytes:
+    Type: String
+    Default: '5242880'
+    Description: Default maximum uploaded image size in bytes.
+  UploadGrantMaxBytes:
+    Type: String
+    Default: '15728640'
+    Description: Maximum allowed configured image size in bytes.
+  UploadGrantDefaultUsageLimit:
+    Type: String
+    Default: '25'
+    Description: Default number of upload attempts allowed per grant.
+  UploadGrantMaxUsageLimit:
+    Type: String
+    Default: '500'
+    Description: Maximum number of upload attempts allowed per grant.
+  AbuseMetricNamespace:
+    Type: String
+    Default: Zoolanding/ImageUpload
+    Description: CloudWatch custom metric namespace for denied upload grants.
+  UploadGrantDeniedAlarmThreshold:
+    Type: Number
+    Default: 5
+    Description: Denied upload grant attempts in 5 minutes before alerting.
+  AbuseNotificationEmail1:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: First optional email endpoint for upload abuse SNS alerts.
+  AbuseNotificationEmail2:
+    Type: String
+    Default: ''
+    NoEcho: true
+    Description: Second optional email endpoint for upload abuse SNS alerts.
   PublicFileCacheControl:
     Type: String
-    Default: public, max-age=31536000, immutable
+    Default: public,max-age=31536000,immutable
     Description: Cache-Control header applied to public uploaded assets.
   LogLevel:
     Type: String
     Default: INFO
     AllowedValues: [DEBUG, INFO, WARNING, ERROR]
     Description: Log level for the Lambda.
+
+Conditions:
+  HasAbuseNotificationEmail1:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AbuseNotificationEmail1
+          - ''
+  HasAbuseNotificationEmail2:
+    Fn::Not:
+      - Fn::Equals:
+          - Ref: AbuseNotificationEmail2
+          - ''
 
 Globals:
   Function:
@@ -39,23 +97,86 @@ Resources:
       StageName: Prod
       Cors:
         AllowOrigin: "'*'"
-        AllowHeaders: "'Content-Type,Authorization'"
+        AllowHeaders: "'Content-Type,Authorization,X-ZLP-Upload-Grant'"
         AllowMethods: "'POST,OPTIONS'"
+
+  UploadGrantsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName:
+        Ref: UploadGrantsTableName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      SSESpecification:
+        SSEEnabled: true
+      TimeToLiveSpecification:
+        AttributeName: expiresAtEpoch
+        Enabled: true
+
+  UploadAbuseTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      TopicName: zoolanding-image-upload-abuse-alerts
+
+  UploadAbuseEmailSubscription1:
+    Type: AWS::SNS::Subscription
+    Condition: HasAbuseNotificationEmail1
+    Properties:
+      TopicArn:
+        Ref: UploadAbuseTopic
+      Protocol: email
+      Endpoint:
+        Ref: AbuseNotificationEmail1
+
+  UploadAbuseEmailSubscription2:
+    Type: AWS::SNS::Subscription
+    Condition: HasAbuseNotificationEmail2
+    Properties:
+      TopicArn:
+        Ref: UploadAbuseTopic
+      Protocol: email
+      Endpoint:
+        Ref: AbuseNotificationEmail2
 
   ImageUploadFunction:
     Type: AWS::Serverless::Function
     Properties:
       CodeUri: .
       Handler: lambda_function.lambda_handler
-      Description: Issues presigned upload URLs for public image assets.
+      Description: Grant-protected public image asset uploads.
       Environment:
         Variables:
           PUBLIC_FILES_BUCKET_NAME:
             Ref: PublicFilesBucketName
           PUBLIC_FILES_BASE_URL:
             Ref: PublicFilesBaseUrl
+          UPLOAD_GRANTS_TABLE_NAME:
+            Ref: UploadGrantsTable
           PRESIGN_EXPIRATION_SECONDS:
             Ref: PresignExpirationSeconds
+          UPLOAD_GRANT_DEFAULT_EXPIRES_SECONDS:
+            Ref: UploadGrantDefaultExpiresSeconds
+          UPLOAD_GRANT_MAX_EXPIRES_SECONDS:
+            Ref: UploadGrantMaxExpiresSeconds
+          UPLOAD_GRANT_DEFAULT_MAX_BYTES:
+            Ref: UploadGrantDefaultMaxBytes
+          UPLOAD_GRANT_MAX_BYTES:
+            Ref: UploadGrantMaxBytes
+          UPLOAD_GRANT_DEFAULT_USAGE_LIMIT:
+            Ref: UploadGrantDefaultUsageLimit
+          UPLOAD_GRANT_MAX_USAGE_LIMIT:
+            Ref: UploadGrantMaxUsageLimit
+          ABUSE_METRIC_NAMESPACE:
+            Ref: AbuseMetricNamespace
           PUBLIC_FILE_CACHE_CONTROL:
             Ref: PublicFileCacheControl
           DEFAULT_IMAGE_MAX_WIDTH: '2048'
@@ -70,9 +191,32 @@ Resources:
           Statement:
             - Effect: Allow
               Action:
+                - s3:GetObject
                 - s3:PutObject
               Resource:
                 Fn::Sub: arn:aws:s3:::${PublicFilesBucketName}/*
+            - Effect: Allow
+              Action:
+                - s3:ListBucket
+              Resource:
+                Fn::Sub: arn:aws:s3:::${PublicFilesBucketName}
+            - Effect: Allow
+              Action:
+                - dynamodb:GetItem
+                - dynamodb:PutItem
+                - dynamodb:UpdateItem
+              Resource:
+                Fn::GetAtt:
+                  - UploadGrantsTable
+                  - Arn
+            - Effect: Allow
+              Action:
+                - cloudwatch:PutMetricData
+              Resource: '*'
+              Condition:
+                StringEquals:
+                  'cloudwatch:namespace':
+                    Ref: AbuseMetricNamespace
       Events:
         ImageUploadPost:
           Type: Api
@@ -81,13 +225,55 @@ Resources:
               Ref: ImageUploadApi
             Path: /image-upload/presign
             Method: POST
+        UploadGrantPost:
+          Type: Api
+          Properties:
+            RestApiId:
+              Ref: ImageUploadApi
+            Path: /image-upload/grants
+            Method: POST
+            Auth:
+              Authorizer: AWS_IAM
+
+  UploadGrantDeniedAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: zoolanding-image-upload-grant-denied
+      AlarmDescription: Denied Zoolanding image upload grant attempts crossed the abuse threshold.
+      Namespace:
+        Ref: AbuseMetricNamespace
+      MetricName: UploadGrantDenied
+      Statistic: Sum
+      Period: 300
+      EvaluationPeriods: 1
+      DatapointsToAlarm: 1
+      Threshold:
+        Ref: UploadGrantDeniedAlarmThreshold
+      ComparisonOperator: GreaterThanOrEqualToThreshold
+      TreatMissingData: notBreaching
+      AlarmActions:
+        - Ref: UploadAbuseTopic
+      OKActions:
+        - Ref: UploadAbuseTopic
 
 Outputs:
   ApiUrl:
-    Description: Image upload presign endpoint URL.
+    Description: Grant-protected image upload endpoint URL.
     Value:
       Fn::Sub: https://${ImageUploadApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/image-upload/presign
   FunctionName:
     Description: Deployed Lambda function name.
     Value:
       Ref: ImageUploadFunction
+  GrantIssuerPath:
+    Description: IAM-protected upload grant endpoint path.
+    Value:
+      Fn::Sub: https://${ImageUploadApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/image-upload/grants
+  UploadGrantsTableName:
+    Description: DynamoDB table that stores hashed upload grants.
+    Value:
+      Ref: UploadGrantsTable
+  UploadAbuseTopicArn:
+    Description: SNS topic for upload abuse alerts.
+    Value:
+      Ref: UploadAbuseTopic

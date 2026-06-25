@@ -18,6 +18,7 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 DRY_RUN = os.getenv("DRY_RUN", "0").strip().lower() in {"1", "true", "yes", "on"}
 _S3_CLIENT = None
 _DYNAMODB_RESOURCE = None
+_CLOUDWATCH_CLIENT = None
 
 
 def should_log(level: str) -> bool:
@@ -55,6 +56,14 @@ def ok(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 def bad_request(message: str, **extra: Any) -> Dict[str, Any]:
     return json_response(400, {"ok": False, "error": message, **extra})
+
+
+def unauthorized(message: str, **extra: Any) -> Dict[str, Any]:
+    return json_response(401, {"ok": False, "error": message, **extra})
+
+
+def forbidden(message: str, **extra: Any) -> Dict[str, Any]:
+    return json_response(403, {"ok": False, "error": message, **extra})
 
 
 def not_found(message: str, **extra: Any) -> Dict[str, Any]:
@@ -134,8 +143,8 @@ def sanitize_key_segment(value: str, fallback: str = "value") -> str:
 
 def normalize_domain(value: str) -> str:
     domain = str(value or "").strip().lower()
-    domain = domain.split(":", 1)[0]
     domain = re.sub(r"^https?://", "", domain)
+    domain = re.split(r"[/:?#]", domain, maxsplit=1)[0]
     domain = domain.strip("/ ")
     return domain
 
@@ -157,6 +166,16 @@ def get_s3_client():
         raise RuntimeError("boto3 is not available")
     _S3_CLIENT = boto3.client("s3")
     return _S3_CLIENT
+
+
+def get_cloudwatch_client():
+    global _CLOUDWATCH_CLIENT
+    if _CLOUDWATCH_CLIENT is not None:
+        return _CLOUDWATCH_CLIENT
+    if boto3 is None:
+        raise RuntimeError("boto3 is not available")
+    _CLOUDWATCH_CLIENT = boto3.client("cloudwatch")
+    return _CLOUDWATCH_CLIENT
 
 
 def get_dynamodb_resource():
@@ -234,7 +253,7 @@ def put_bytes_to_s3(bucket: str, key: str, payload: bytes, content_type: str) ->
         Key=key,
         Body=payload,
         ContentType=content_type,
-        CacheControl="public, max-age=31536000, immutable",
+        CacheControl="public,max-age=31536000,immutable",
     )
 
 
@@ -249,6 +268,17 @@ def put_item(table_name: str, item: Dict[str, Any]) -> None:
         log("INFO", "Dry run: skipping DynamoDB put_item", table=table_name, pk=item.get("pk"), sk=item.get("sk"))
         return
     get_table(table_name).put_item(Item=item)
+
+
+def object_exists(bucket: str, key: str) -> bool:
+    try:
+        get_s3_client().head_object(Bucket=bucket, Key=key)
+        return True
+    except ClientError as exc:  # type: ignore[misc]
+        code = str(getattr(exc, "response", {}).get("Error", {}).get("Code"))
+        if code in {"404", "NoSuchKey", "NotFound"}:
+            return False
+        raise
 
 
 def site_pk(domain: str) -> str:

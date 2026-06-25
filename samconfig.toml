@@ -10,6 +10,16 @@ capabilities = "CAPABILITY_IAM"
 parameter_overrides = [
   "PublicFilesBucketName=zoolandingpage-public-files",
   "PublicFilesBaseUrl=https://assets.zoolandingpage.com.mx",
+  "UploadGrantsTableName=zoolanding-image-upload-grants",
   "PresignExpirationSeconds=900",
+  "UploadGrantDefaultExpiresSeconds=28800",
+  "UploadGrantMaxExpiresSeconds=86400",
+  "UploadGrantDefaultMaxBytes=5242880",
+  "UploadGrantMaxBytes=15728640",
+  "UploadGrantDefaultUsageLimit=25",
+  "UploadGrantMaxUsageLimit=500",
+  "AbuseMetricNamespace=Zoolanding/ImageUpload",
+  "UploadGrantDeniedAlarmThreshold=5",
+  "PublicFileCacheControl=public,max-age=31536000,immutable",
   "LogLevel=INFO"
 ]
