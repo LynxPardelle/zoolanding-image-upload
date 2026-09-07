@@ -20,6 +20,40 @@ parameter_overrides = [
   "UploadGrantMaxUsageLimit=500",
   "AbuseMetricNamespace=Zoolanding/ImageUpload",
   "UploadGrantDeniedAlarmThreshold=5",
+  "UploadAbuseTopicName=zoolanding-image-upload-abuse-alerts",
+  "UploadGrantDeniedAlarmName=zoolanding-image-upload-grant-denied",
   "PublicFileCacheControl=public,max-age=31536000,immutable",
   "LogLevel=INFO"
+]
+
+[test.deploy.parameters]
+stack_name = "zoolanding-image-upload-test"
+resolve_s3 = true
+s3_prefix = "zoolanding-image-upload-test"
+region = "us-east-1"
+confirm_changeset = false
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = [
+  "PublicFilesBucketName=zoolandingpage-public-files-test",
+  "PublicFilesBaseUrl=https://test-assets.zoolandingpage.com.mx",
+  "UploadGrantsTableName=zoolanding-image-upload-grants-test",
+  "PresignExpirationSeconds=900",
+  "UploadGrantDefaultExpiresSeconds=28800",
+  "UploadGrantMaxExpiresSeconds=86400",
+  "UploadGrantDefaultMaxBytes=5242880",
+  "UploadGrantMaxBytes=15728640",
+  "UploadGrantDefaultUsageLimit=25",
+  "UploadGrantMaxUsageLimit=500",
+  "AbuseMetricNamespace=Zoolanding/ImageUpload/Test",
+  "UploadGrantDeniedAlarmThreshold=5",
+  "UploadAbuseTopicName=zoolanding-image-upload-abuse-alerts-test",
+  "UploadGrantDeniedAlarmName=zoolanding-image-upload-grant-denied-test",
+  "PublicFileCacheControl=public,max-age=31536000,immutable",
+  "LogLevel=INFO",
+  "ProvisionThnPrivateUploadV2State=false",
+  "EnableThnPrivateUploadV2=false",
+  "ThnPrivateUploadV2TerminationProtectionGate=BLOCKED",
+  "ThnContentHubV2DescriptorVersionId=BLOCKED",
+  "ThnContentHubV2DescriptorSha256=0000000000000000000000000000000000000000000000000000000000000000",
+  "ThnContentHubV2AuthPolicyVersion=BLOCKED"
 ]

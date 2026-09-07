@@ -114,6 +114,19 @@ Example:
 test.zoolandingpage.com.mx/default/hero-images/headline-art.png
 ```
 
+## Lambda packaging
+
+SAM uses a separate Makefile build for each function. The public uploader contains
+only `lambda_function.py` and `zoolanding_lambda_common.py`; the private THN
+uploader contains only `private_upload_v2.py`, `private_upload_v2_pipeline.py`,
+and the shared helper. Each package installs Pillow for Linux x86_64 / Python
+3.13, independently of the build host. The Pillow floor is 12.3; its manylinux
+2.28 wheels are compatible with that runtime's Amazon Linux 2023 base. The Makefile validates the resulting
+allowlist and rejects foreign-platform binaries, tests, and operator tooling.
+Run `python tools/check_lambda_artifacts.py` after `sam build` to repeat this
+check. No routes, IAM policies, storage boundaries, or activation defaults are
+changed by this packaging contract.
+
 ## Required S3 CORS
 
 The bucket must allow `PUT` when presigned uploads are enabled for approved app origins. Grant validation in Lambda is still the authorization boundary. A minimal starting point is:
