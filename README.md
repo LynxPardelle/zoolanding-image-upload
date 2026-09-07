@@ -127,6 +127,44 @@ Run `python tools/check_lambda_artifacts.py` after `sam build` to repeat this
 check. No routes, IAM policies, storage boundaries, or activation defaults are
 changed by this packaging contract.
 
+
+## Isolated THN TEST release selection
+
+The immutable TEST deploy and rollback workflows accept the optional environment
+variable `THN_V2_TEST_PARAMETERS_JSON`. Omission preserves their previous
+parameter maps exactly, including disabled THN defaults. Ordinary SAM configuration
+remains unchanged; this is not an instruction to activate it through `sam deploy`.
+
+A supplied selection is a closed JSON object with `schemaVersion: 1`,
+`environment: "test"`, and `parameters` containing exactly the six keys returned
+by `_thn_defaults()` in `tools/prepare_test_parameters.py`. Partial selections,
+unknown or shared parameters, duplicate keys, malformed identifiers, placeholders
+for an enabled runtime, and input above 16 KiB are rejected before credentials.
+The selection cannot change v1 provisioning, grants, notifications, registry
+activation, user accounts, writer mode, or writer epoch.
+
+After AWS credentials are configured, the same packaged tool performs a read-only
+preflight before any change set. It verifies the deployment account and requires
+`us-east-1`; a supplied configuration cannot select another account or region.
+Provisioning retained state or enabling the private processor requires the exact
+Image Upload TEST stack to be stable and termination-protected. Enabling the
+runtime also requires the exact Content Hub TEST registry and authoring role;
+state-only provisioning does not require that runtime caller. Both parameter
+switches remain independent, but changing an already-enabled runtime to disabled
+removes conditional resources and is rejected by the existing no-removal
+change-set guard. Such a transition needs a separately reviewed recovery path;
+this selection tool does not establish it or weaken that guard. The preflight
+does not enable termination protection or mutate resources.
+
+No workflow dispatch, deployment, account provisioning, or activation is implied
+by this tooling. The remaining service, immutable recovery, editorial, and
+integration gates must still pass. A prior rollback artifact must contain this
+selection/preflight contract; older artifacts cannot silently stand in for it.
+For a supplied THN selection, the workflows require the packaged tool to report
+`thn-test-selection/v1` before credentials. A legacy tool without that capability
+fails the release instead of silently ignoring the selection. With no THN
+selection, the compatibility check is skipped and the prior path is unchanged.
+
 ## Required S3 CORS
 
 The bucket must allow `PUT` when presigned uploads are enabled for approved app origins. Grant validation in Lambda is still the authorization boundary. A minimal starting point is:
