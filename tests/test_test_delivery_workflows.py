@@ -40,7 +40,7 @@ class TestDeliveryWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("pull_request_target", workflow)
         self.assert_actions_are_commit_pinned(workflow)
 
-    def test_deploy_uses_exact_test_artifact_and_reviewed_change_set(self):
+    def test_promotion_validates_exact_test_artifact_without_deployment(self):
         workflow = self.workflow("deploy-test.yml")
         self.assertIn("branches: [test]", workflow)
         self.assertIn(
@@ -50,7 +50,18 @@ class TestDeliveryWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("refs/remotes/origin/main", workflow)
         self.assertIn("${{ github.sha }}", workflow)
         self.assertRegex(workflow, r"\^\[a-f0-9\]\{40\}\$")
-        self.assert_release_boundary(workflow)
+        for value in (
+            "verify-artifact:", "artifact-ids:", "manifest_digest", "sha256sum",
+            "recomputed-build-manifest.sha256", "cmp --silent",
+            "zoolanding-test-validation/v1", '"deployable": False',
+        ):
+            self.assertIn(value, workflow)
+        for value in (
+            "environment:", "id-token:", "configure-aws-credentials", "${{ vars.",
+            "${{ secrets.", "run_test_change_set.sh", "sam deploy", "pull_request_target",
+        ):
+            self.assertNotIn(value, workflow)
+        self.assert_actions_are_commit_pinned(workflow)
 
     def test_rollback_selects_one_recorded_immutable_release(self):
         workflow = self.workflow("rollback-test.yml")

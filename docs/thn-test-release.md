@@ -1,6 +1,30 @@
 # Private retained THN TEST lifecycle
 
-This local A–C candidate is not a deployment or a completed D gate. Production, the v1 uploader and ordinary deploy/rollback guards are unchanged. Use only the reviewed dedicated [workflow](../.github/workflows/deploy-thn-test.yml), never an ad-hoc bootstrap or `sam deploy`.
+Source integration and validation are not a deployment or a completed D gate.
+Production, the v1 uploader and legacy rollback guards are unchanged. Use only
+the reviewed dedicated [workflow](../.github/workflows/deploy-thn-test.yml), never
+an ad-hoc bootstrap or `sam deploy`.
+
+## Source promotion is validation only
+
+The push-to-TEST [workflow](../.github/workflows/deploy-test.yml) validates the
+exact non-forced `dev` merge, runs both required test suites, builds SAM packages,
+and verifies the downloaded artifact independently. It has no GitHub environment,
+OIDC permission, deployment variables/secrets or AWS execution steps.
+
+Its `zoolanding-test-validation/v1` artifact explicitly states
+`purpose: validation-only` and `deployable: false`; its complete inventory,
+manifest digest, SHA, service, run and attempt are verified. Legacy rollback
+accepts only its historical `zoolanding-test-release/v1` contract and rejects a
+validation-only artifact before AWS credentials. Do not use validation run/artifact
+coordinates as evidence of a deployment or an executable recovery target.
+
+The dedicated private lifecycle still uses its separate
+`zoolanding-thn-test-release/v1` contract and reviewed manual TEST operation.
+Neither this workflow nor legacy rollback was modified by the separation.
+All dependency, identity, artifact, change-set and retained-state checks remain
+mandatory before private execution; no new AWS services are provisioned by the
+source-validation pipeline.
 
 ## Operations
 

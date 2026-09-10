@@ -218,9 +218,9 @@ class ThnCloudPreflightTests(unittest.TestCase):
 
 
 class ThnWorkflowSelectionTests(unittest.TestCase):
-    def test_both_workflows_forward_selection_and_check_before_changes(self):
+    def test_legacy_rollback_forwards_selection_and_checks_before_changes(self):
         root = Path(__file__).resolve().parents[1]
-        for name in ("deploy-test.yml", "rollback-test.yml"):
+        for name in ("rollback-test.yml",):
             workflow = (root / ".github" / "workflows" / name).read_text()
             with self.subTest(name=name):
                 self.assertEqual(workflow.count("THN_V2_TEST_PARAMETERS_JSON: ${{ vars.THN_V2_TEST_PARAMETERS_JSON }}"), 2)

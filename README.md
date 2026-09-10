@@ -43,15 +43,29 @@ This Lambda uploads public image assets only when a caller presents a temporary 
 
 ## Deploy
 
-The ordinary TEST workflow accepts only a non-forced two-parent merge from the
+The TEST source-validation workflow accepts only a non-forced two-parent merge from the
 current `dev` tip into `test`: its first parent must equal the push's previous
 TEST SHA, its second parent must equal fetched `dev`, and its complete tree must
 match `dev`. Direct pushes, squash/octopus merges, stale or substituted sources,
-and `main` promotions are rejected before AWS credentials. Production and the
-immutable artifact, rollback, identity and state-retention guards are unchanged.
-Source integration into `dev` is not a deployment or activation. The dedicated private-only THN lifecycle remains separate; this change does not authorize creating shared v1 upload resources.
+and `main` promotions are rejected. `.github/workflows/deploy-test.yml` now runs
+only source validation, runtime/release tests, SAM build and independent immutable
+artifact verification. Neither job selects an environment, requests OIDC, reads
+deployment variables/secrets, obtains AWS credentials or executes a change set.
+Promotion to `test` is **not a deployment or activation**.
 
-For repeatable deployments from this repository:
+Artifacts are named `zoolanding-image-upload-test-validation-...` and carry
+`zoolanding-test-validation/v1`, `purpose: validation-only`, and `deployable: false`.
+Transport verification binds the complete inventory, manifest digest, source SHA,
+service, run ID and attempt. These are validation records, not deployment/rollback
+artifacts; the unchanged legacy rollback rejects their schema before credentials.
+
+Use the separate [private THN lifecycle](docs/thn-test-release.md) for reviewed
+manual TEST execution. Production, runtime code, SAM templates, the dedicated
+private workflow and historical rollback guards are unchanged. No shared v1
+upload resources are created by promoting source to TEST.
+
+The existing general uploader deployment commands below are **not** the private
+THN TEST activation path:
 
 ```bash
 sam deploy
@@ -136,10 +150,11 @@ check. No routes, IAM policies, storage boundaries, or activation defaults are
 changed by this packaging contract.
 
 
-## Isolated THN TEST release selection
+## Legacy TEST rollback selection compatibility
 
-The immutable TEST deploy and rollback workflows accept the optional environment
-variable `THN_V2_TEST_PARAMETERS_JSON`. Omission preserves their previous
+The unchanged legacy rollback workflow accepts the optional environment
+variable `THN_V2_TEST_PARAMETERS_JSON` for compatible historical release artifacts.
+New source-validation artifacts cannot be used here. Omission preserves its previous
 parameter maps exactly, including disabled THN defaults. Ordinary SAM configuration
 remains unchanged; this is not an instruction to activate it through `sam deploy`.
 
@@ -168,7 +183,7 @@ No workflow dispatch, deployment, account provisioning, or activation is implied
 by this tooling. The remaining service, immutable recovery, editorial, and
 integration gates must still pass. A prior rollback artifact must contain this
 selection/preflight contract; older artifacts cannot silently stand in for it.
-For a supplied THN selection, the workflows require the packaged tool to report
+For a supplied THN selection, legacy rollback requires the packaged tool to report
 `thn-test-selection/v1` before credentials. A legacy tool without that capability
 fails the release instead of silently ignoring the selection. With no THN
 selection, the compatibility check is skipped and the prior path is unchanged.
@@ -184,9 +199,9 @@ See the [AWS response contract](https://docs.aws.amazon.com/AWSCloudFormation/la
 The [THN lifecycle guide](docs/thn-test-release.md) defines the private-only
 protected `create`, retained `provision`, `enable` and `disable` operations.
 The observed TEST stack was absent; CREATE must not bootstrap v1 routes or
-use UPDATE/previous values. This dedicated path does not relax the ordinary
-selection/rollback guard described above. All changes remain local A–C
-reconciliation, not an AWS deployment or completed D gate.
+use UPDATE/previous values. This dedicated path does not relax the legacy
+selection/rollback guard described above. Source validation and A–C
+reconciliation are not an AWS deployment or completed D gate.
 
 Install runtime and release dependencies and run both mandatory suites:
 
