@@ -226,7 +226,7 @@ def _decode_and_validate_event(
         _require_string(scope.get(field), field, safe_id=True)
     if scope.get("locale") not in {"en", "es"}:
         raise _RequestError("invalid_request", "locale is invalid")
-    if scope.get("actorPurpose") not in {"client-owner", "qa-only"}:
+    if scope.get("actorPurpose") not in {"client-owner", "qa"}:
         raise _RequestError("invalid_request", "actorPurpose is invalid")
     if scope.get("contentType") not in ALLOWED_CONTENT_TYPES:
         raise _RequestError("invalid_request", "contentType is invalid")
@@ -337,7 +337,7 @@ def _validate_registry(
         "descriptorVersionId": settings["descriptorVersionId"],
         "descriptorSha256": settings["descriptorSha256"],
         "activationStatus": "active",
-        "writerMode": scope["actorPurpose"],
+        "writerMode": "qa-only" if scope["actorPurpose"] == "qa" else "client-owner",
         "writerEpoch": scope["writerEpoch"],
         "hubId": HUB_ID,
         "tenantId": scope["tenantId"],
@@ -551,8 +551,8 @@ class AwsPrivateUploadV2Runtime:
         )
         return claimed
 
-    def store_variant(self, key: str, body: bytes, content_type: str) -> None:
-        self.s3.put_object(
+    def store_variant(self, key: str, body: bytes, content_type: str) -> str:
+        response = self.s3.put_object(
             Bucket=self.bucket_name,
             Key=key,
             Body=body,
@@ -560,6 +560,10 @@ class AwsPrivateUploadV2Runtime:
             CacheControl="private,no-store,max-age=0",
             ServerSideEncryption="AES256",
         )
+        version = response.get("VersionId") if isinstance(response, dict) else None
+        if not isinstance(version, str) or not version or version == "null":
+            raise _RequestError("processing_failed", "versioned private storage is required")
+        return version
 
     def finalize_transaction(
         self,
@@ -568,6 +572,7 @@ class AwsPrivateUploadV2Runtime:
         claim_id: str,
         result: ProcessedImage,
         now_epoch: int,
+        stored_versions: dict[str, str],
     ) -> None:
         variant_metadata = [
             {
@@ -577,6 +582,7 @@ class AwsPrivateUploadV2Runtime:
                 "bytes": variant.byte_length,
                 "sha256": variant.sha256,
                 "contentType": variant.content_type,
+                "versionId": stored_versions[variant.variant_id],
             }
             for variant in result.variants
         ]
@@ -744,15 +750,16 @@ def handle_request(
 
         try:
             result = process_image(source, scope["contentType"])
+            stored_versions = {}
             for variant in result.variants:
                 key = _variant_key(
                     scope, claimed["assetId"], variant.variant_id, variant.content_type
                 )
-                active_runtime.store_variant(key, variant.body, variant.content_type)
+                stored_versions[variant.variant_id] = active_runtime.store_variant(key, variant.body, variant.content_type)
             if now_epoch is None:
                 operation_now = int(time.time())
             active_runtime.finalize_transaction(
-                claimed, registry, claim_id, result, operation_now
+                claimed, registry, claim_id, result, operation_now, stored_versions
             )
         except PrivateImageValidationError:
             active_runtime.release_transaction(

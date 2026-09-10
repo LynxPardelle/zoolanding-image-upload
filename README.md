@@ -165,7 +165,49 @@ For a supplied THN selection, the workflows require the packaged tool to report
 fails the release instead of silently ignoring the selection. With no THN
 selection, the compatibility check is skipped and the prior path is unchanged.
 
+`DescribeChangeSet` does not return a `ChangeSetType` field. The TEST runner binds
+`CREATE` or `UPDATE` when creating the change set and reviews the exact returned
+ARN, name and stack; an absent response field is accepted, while a conflicting
+field is rejected. Parameter, removal and replacement guards remain unchanged.
+See the [AWS response contract](https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_DescribeChangeSet.html).
+
+## Dedicated retained TEST lifecycle and checks
+
+The [THN lifecycle guide](docs/thn-test-release.md) defines the private-only
+protected `create`, retained `provision`, `enable` and `disable` operations.
+The observed TEST stack was absent; CREATE must not bootstrap v1 routes or
+use UPDATE/previous values. This dedicated path does not relax the ordinary
+selection/rollback guard described above. All changes remain local A–C
+reconciliation, not an AWS deployment or completed D gate.
+
+Install runtime and release dependencies and run both mandatory suites:
+
+```powershell
+python -m pip install -r requirements.txt -r requirements-release.txt
+python -m pip check
+python -m unittest discover -s tests -p "test_*.py"
+python -m unittest discover -s tests_release -p "test_*.py"
+sam build --no-cached
+python tools/check_lambda_artifacts.py
+sam validate
+cfn-lint -t template.yaml -r us-east-1
+pip-audit -r requirements.txt -r requirements-release.txt
+actionlint
+```
+
+Use cfn-lint 1.56.0. Parser/lifecycle tests live in `tests_release` without optional
+skips, and both suites run in the dedicated release and credential-free PR/candidate
+validation jobs. The guide also documents native concurrency closure, exact
+execution-role prerequisites, and why QA retention metadata is not automatic purge.
+
 ## Required S3 CORS
+
+The THN private v2 candidate does not use the public presign/CORS workflow below.
+Its IAM caller sends the server-owned `actorPurpose` (`qa` or `client-owner`);
+the processor maps `qa` to registry `writerMode=qa-only` and rejects crossed
+purposes. Each stored variant must return a non-null S3 version ID, retained in
+the consumed private transaction, but omitted from the safe processor response.
+This local correction does not deploy or activate the private processor.
 
 The bucket must allow `PUT` when presigned uploads are enabled for approved app origins. Grant validation in Lambda is still the authorization boundary. A minimal starting point is:
 
