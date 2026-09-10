@@ -39,6 +39,15 @@ The 2026-09-08 baseline was an **absent Image TEST stack**. CREATE therefore doe
 
 CreateChangeSet uses `ChangeSetType=CREATE`, `OnStackFailure=DO_NOTHING`, and the exact existing Infra-owned CloudFormation role. After validating the complete processed template and the exact reviewed additions, the runner enables termination protection on the returned StackId. It rereads true protection, `REVIEW_IN_PROGRESS`, empty inventory and the unchanged change set/template hash **before** ExecuteChangeSet. Failed protection or review leaves the inactive placeholder; it does not delete it or disable protection. A retry against any existing stack/placeholder fails closed. Two final observations require the same StackId/role, full parameters and exact logical-ID/type equality with all reviewed additions; missing, duplicate, substituted or extra resources fail.
 
+The two reviewed `DescribeChangeSet` responses are compared without only their
+top-level SDK `ResponseMetadata`. Request IDs, HTTP headers and retry counts
+describe separate requests, not the change-set configuration. Every other
+returned field remains part of the comparison, including unknown fields and
+nested fields named `ResponseMetadata`. Neither response is mutated. Genuine
+payload drift still leaves the protected placeholder unexecuted, without any
+cleanup or protection bypass. Template, parameter, identity, inventory and
+retained-state checks are unchanged.
+
 This follows the native [CreateChangeSet contract](https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_CreateChangeSet.html) and [termination-protection states](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-protect-stacks.html). `OnStackFailure` is a CreateChangeSet field, not an ExecuteChangeSet argument.
 
 ## Native closure and retained rollback

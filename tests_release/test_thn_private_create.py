@@ -50,13 +50,16 @@ class CreateServices:
 
     def describe_change_set(self, **kwargs):
         self.calls.append(("describe_change_set", kwargs))
+        request_number = sum(name == "describe_change_set" for name, _ in self.calls)
         additions = [resource_change(key, kind if kind != "AWS::Serverless::Function" else "AWS::Lambda::Function", "Add")
             for key, kind in subject.RESOURCE_TYPES.items() if kind != "AWS::Lambda::Permission"]
         additions += [resource_change(FUNCTION + "Aliastest", "AWS::Lambda::Alias", "Add"),
                       resource_change(FUNCTION + "Versiona1b2c3d4e5", "AWS::Lambda::Version", "Add")]
         return {"ChangeSetId": self.change_id, "ChangeSetName": "thn-123-1", "StackId": self.stack_id,
             "StackName": subject.STACK, "Status": "CREATE_COMPLETE", "ExecutionStatus": "AVAILABLE",
-            "OnStackFailure": "DO_NOTHING", "Parameters": self.parameters, "Changes": additions}
+            "OnStackFailure": "DO_NOTHING", "Parameters": self.parameters, "Changes": additions,
+            "ResponseMetadata": {"RequestId": f"request-{request_number}", "HTTPStatusCode": 200,
+                                 "HTTPHeaders": {"x-amzn-requestid": f"request-{request_number}"}, "RetryAttempts": 0}}
 
     def get_template(self, **kwargs):
         self.calls.append(("get_template", kwargs))
@@ -186,6 +189,49 @@ class PrivateCreateTests(unittest.TestCase):
             if name in {"protect", "execute"}:
                 self.assertEqual(request["StackName"], self.session.stack_id)
         self.assertFalse(any(name.startswith("delete") for name in names))
+
+    def test_sdk_response_metadata_changes_do_not_block_reviewed_private_create(self):
+        responses = []
+        original = self.session.describe_change_set
+
+        def capture(**kwargs):
+            response = original(**kwargs)
+            responses.append((response, deepcopy(response)))
+            return response
+
+        self.session.describe_change_set = capture
+        try:
+            result = self.run_create()
+        except subject.ReleaseBlocked:
+            self.fail("Transport-only SDK metadata must not block a fully reviewed CREATE")
+        self.assertEqual(result["decision"], "executed")
+        self.assertEqual(len(responses), 2)
+        self.assertNotEqual(responses[0][0]["ResponseMetadata"], responses[1][0]["ResponseMetadata"])
+        for response, snapshot in responses:
+            self.assertEqual(response, snapshot, "Comparison must not mutate either SDK response")
+
+    def test_non_transport_response_drift_keeps_private_placeholder_closed(self):
+        for field in ("UnknownProviderField", "Description", "Changes"):
+            with self.subTest(field=field):
+                self.session = CreateServices(self.template)
+                original = self.session.describe_change_set
+                counter = [0]
+
+                def changed(**kwargs):
+                    response = original(**kwargs)
+                    counter[0] += 1
+                    if field == "Changes":
+                        response["Changes"][0]["ResponseMetadata"] = {"value": counter[0]}
+                    else:
+                        response[field] = {"ResponseMetadata": {"value": counter[0]}}
+                    return response
+
+                self.session.describe_change_set = changed
+                with self.assertRaisesRegex(subject.ReleaseBlocked, "placeholder_inactive"):
+                    self.run_create()
+                self.assertTrue(self.session.protected)
+                self.assertFalse(self.session.executed)
+                self.assertFalse(any(name.startswith("delete") for name, _ in self.session.calls))
 
     def test_preexisting_stack_or_placeholder_retry_does_not_modify_it(self):
         self.session.exists = True

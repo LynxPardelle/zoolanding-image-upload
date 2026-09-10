@@ -481,7 +481,10 @@ def run_create_release(session: Any, env: dict, template: dict, account: str) ->
                 or placeholders[0].get("StackName") != STACK or placeholders[0].get("StackStatus") != "REVIEW_IN_PROGRESS"
                 or placeholders[0].get("EnableTerminationProtection") is not True or _inventory(cfn, stack_id)):
             raise ReleaseBlocked("private_create_protection_readback_failed")
-        if review() != reviewed:
+        current_review = review()
+        # SDK transport metadata changes per request; compare every other field.
+        if ({key: value for key, value in current_review.items() if key != "ResponseMetadata"}
+                != {key: value for key, value in reviewed.items() if key != "ResponseMetadata"}):
             raise ReleaseBlocked("private_create_review_changed")
     except Exception:
         raise ReleaseBlocked("private_create_placeholder_inactive; protection_or_review_not_verified; no_cleanup_attempted") from None
