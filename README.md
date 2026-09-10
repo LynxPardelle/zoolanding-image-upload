@@ -43,6 +43,14 @@ This Lambda uploads public image assets only when a caller presents a temporary 
 
 ## Deploy
 
+The ordinary TEST workflow accepts only a non-forced two-parent merge from the
+current `dev` tip into `test`: its first parent must equal the push's previous
+TEST SHA, its second parent must equal fetched `dev`, and its complete tree must
+match `dev`. Direct pushes, squash/octopus merges, stale or substituted sources,
+and `main` promotions are rejected before AWS credentials. Production and the
+immutable artifact, rollback, identity and state-retention guards are unchanged.
+Source integration into `dev` is not a deployment or activation. The dedicated private-only THN lifecycle remains separate; this change does not authorize creating shared v1 upload resources.
+
 For repeatable deployments from this repository:
 
 ```bash
