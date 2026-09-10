@@ -172,8 +172,9 @@ class FakeRuntime:
     def store_variant(self, key, body, content_type):
         self.calls.append(("store", key, content_type))
         self.objects.append((key, body, content_type))
+        return "fixture-version"
 
-    def finalize_transaction(self, transaction, registry, claim_id, result, now_epoch):
+    def finalize_transaction(self, transaction, registry, claim_id, result, now_epoch, stored_versions):
         self.calls.append(("finalize", claim_id, now_epoch, result))
 
     def release_transaction(self, transaction, claim_id, error_code, now_epoch):
@@ -302,10 +303,10 @@ class PrivateUploadV2HandlerTests(unittest.TestCase):
     def test_final_commit_uses_fresh_time_and_fails_if_transaction_expired(self):
         class ExpiryCheckingRuntime(FakeRuntime):
             def finalize_transaction(
-                self, transaction, registry, claim_id, result, now_epoch
+                self, transaction, registry, claim_id, result, now_epoch, stored_versions
             ):
                 super().finalize_transaction(
-                    transaction, registry, claim_id, result, now_epoch
+                    transaction, registry, claim_id, result, now_epoch, stored_versions
                 )
                 if int(transaction["expiresAtEpoch"]) <= now_epoch:
                     raise RuntimeError("transaction expired before final commit")
@@ -556,7 +557,8 @@ class PrivateUploadV2AwsRuntimeTests(unittest.TestCase):
         )
 
         self.runtime.finalize_transaction(
-            claimed, self.registry, "claim-1", result, NOW
+            claimed, self.registry, "claim-1", result, NOW,
+            {variant.variant_id: "fixture-version" for variant in result.variants},
         )
 
         self.assertEqual(len(self.client.transact_calls), 1)
@@ -564,6 +566,8 @@ class PrivateUploadV2AwsRuntimeTests(unittest.TestCase):
         self.assertEqual(len(call["TransactItems"]), 2)
         registry_check = call["TransactItems"][0]["ConditionCheck"]
         transaction_update = call["TransactItems"][1]["Update"]
+        variants = transaction_update["ExpressionAttributeValues"][":variants"]["L"]
+        self.assertTrue(all(item["M"]["versionId"] == {"S": "fixture-version"} for item in variants))
         for field in (
             "environment",
             "domain",
@@ -596,7 +600,7 @@ class PrivateUploadV2AwsRuntimeTests(unittest.TestCase):
     def test_private_object_write_has_no_public_acl(self):
         calls = []
         self.runtime.s3 = SimpleNamespace(
-            put_object=lambda **kwargs: calls.append(kwargs)
+            put_object=lambda **kwargs: calls.append(kwargs) or {"VersionId": "fixture-version"}
         )
 
         self.runtime.store_variant("private/test/example", b"safe", "image/webp")

@@ -118,7 +118,7 @@ Metadata:
     Required: true
     FailureMode: BLOCK
     DefaultState: BLOCKED
-    Enforcement: The TEST deployment workflow must enable and verify CloudFormation termination protection before creating a change set.
+    Enforcement: The dedicated TEST workflow must verify termination protection before execution; CREATE protects the exact empty REVIEW_IN_PROGRESS placeholder first.
 
 Rules:
   ThnPrivateUploadV2StateProtectionRule:
@@ -420,7 +420,7 @@ Resources:
 
   ThnPrivateImageUploadV2Role:
     Type: AWS::IAM::Role
-    Condition: IsThnPrivateUploadV2Enabled
+    Condition: IsThnPrivateUploadV2StateProvisioned
     Properties:
       RoleName: zoolanding-image-upload-test-ThnImageUploadV2Role
       AssumeRolePolicyDocument:
@@ -496,7 +496,7 @@ Resources:
 
   ThnPrivateImageUploadV2Function:
     Type: AWS::Serverless::Function
-    Condition: IsThnPrivateUploadV2Enabled
+    Condition: IsThnPrivateUploadV2StateProvisioned
     Metadata:
       BuildMethod: makefile
     Properties:
@@ -511,7 +511,8 @@ Resources:
           - Arn
       Timeout: 90
       MemorySize: 2048
-      ReservedConcurrentExecutions: 2
+      ReservedConcurrentExecutions:
+        Fn::If: [IsThnPrivateUploadV2Enabled, 2, 0]
       EphemeralStorage:
         Size: 1024
       Environment:
@@ -536,7 +537,7 @@ Resources:
     Properties:
       Action: lambda:InvokeFunction
       FunctionName:
-        Ref: ThnPrivateImageUploadV2Function
+        Ref: ThnPrivateImageUploadV2Function.Alias
       Principal:
         Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/zlp-thn-ch-test-authoring
 
