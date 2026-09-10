@@ -51,6 +51,16 @@ Parameters:
     Type: Number
     Default: 5
     Description: Denied upload grant attempts in 5 minutes before alerting.
+  UploadAbuseTopicName:
+    Type: String
+    Default: zoolanding-image-upload-abuse-alerts
+    AllowedPattern: '^[A-Za-z0-9_-]{1,256}$'
+    Description: SNS topic name for upload-abuse alerts.
+  UploadGrantDeniedAlarmName:
+    Type: String
+    Default: zoolanding-image-upload-grant-denied
+    AllowedPattern: '^[A-Za-z0-9_-]{1,255}$'
+    Description: CloudWatch alarm name for denied upload grants.
   AbuseNotificationEmail1:
     Type: String
     Default: ''
@@ -70,6 +80,92 @@ Parameters:
     Default: INFO
     AllowedValues: [DEBUG, INFO, WARNING, ERROR]
     Description: Log level for the Lambda.
+  ProvisionThnPrivateUploadV2State:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: Fail-closed opt-in for retained The Hair Narrative TEST private-upload state.
+  EnableThnPrivateUploadV2:
+    Type: String
+    Default: 'false'
+    AllowedValues: ['false', 'true']
+    Description: Fail-closed opt-in for the private The Hair Narrative TEST image processor.
+  ThnPrivateUploadV2TerminationProtectionGate:
+    Type: String
+    Default: BLOCKED
+    AllowedValues: [BLOCKED, CONFIRMED_ENABLED]
+    Description: Blocks v2 activation until the deployment preflight confirms stack termination protection.
+  ThnContentHubV2DescriptorVersionId:
+    Type: String
+    Default: BLOCKED
+    AllowedPattern: '^(BLOCKED|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$'
+    Description: Immutable version ID of the approved THN journal TEST service descriptor.
+  ThnContentHubV2DescriptorSha256:
+    Type: String
+    Default: '0000000000000000000000000000000000000000000000000000000000000000'
+    AllowedPattern: '^[a-f0-9]{64}$'
+    Description: Lowercase SHA-256 digest of the approved immutable THN journal TEST service descriptor.
+  ThnContentHubV2AuthPolicyVersion:
+    Type: String
+    Default: BLOCKED
+    AllowedPattern: '^(BLOCKED|[A-Za-z0-9][A-Za-z0-9._:-]{0,127})$'
+    Description: Exact approved Auth Admin policy version for the THN journal TEST binding.
+
+Metadata:
+  ThnPrivateUploadV2DeploymentGuards:
+    Environment: test
+    GateParameter: ThnPrivateUploadV2TerminationProtectionGate
+    Required: true
+    FailureMode: BLOCK
+    DefaultState: BLOCKED
+    Enforcement: The dedicated TEST workflow must verify termination protection before execution; CREATE protects the exact empty REVIEW_IN_PROGRESS placeholder first.
+
+Rules:
+  ThnPrivateUploadV2StateProtectionRule:
+    RuleCondition:
+      Fn::Equals:
+        - Ref: ProvisionThnPrivateUploadV2State
+        - 'true'
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ThnPrivateUploadV2TerminationProtectionGate
+            - CONFIRMED_ENABLED
+        AssertDescription: Stack termination protection must be confirmed before retained THN private-upload state is provisioned.
+  ThnPrivateUploadV2ActivationRule:
+    RuleCondition:
+      Fn::Equals:
+        - Ref: EnableThnPrivateUploadV2
+        - 'true'
+    Assertions:
+      - Assert:
+          Fn::Equals:
+            - Ref: ProvisionThnPrivateUploadV2State
+            - 'true'
+        AssertDescription: Retained THN private-upload state must be provisioned before activation.
+      - Assert:
+          Fn::Equals:
+            - Ref: ThnPrivateUploadV2TerminationProtectionGate
+            - CONFIRMED_ENABLED
+        AssertDescription: Stack termination protection must be confirmed before THN private upload activation.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: ThnContentHubV2DescriptorVersionId
+                - BLOCKED
+        AssertDescription: An immutable THN journal TEST descriptor version is required before activation.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: ThnContentHubV2DescriptorSha256
+                - '0000000000000000000000000000000000000000000000000000000000000000'
+        AssertDescription: The approved THN journal TEST descriptor digest is required before activation.
+      - Assert:
+          Fn::Not:
+            - Fn::Equals:
+                - Ref: ThnContentHubV2AuthPolicyVersion
+                - BLOCKED
+        AssertDescription: The approved THN journal TEST Auth Admin policy version is required before activation.
 
 Conditions:
   HasAbuseNotificationEmail1:
@@ -82,6 +178,16 @@ Conditions:
       - Fn::Equals:
           - Ref: AbuseNotificationEmail2
           - ''
+  IsThnPrivateUploadV2StateProvisioned:
+    Fn::Equals:
+      - Ref: ProvisionThnPrivateUploadV2State
+      - 'true'
+  IsThnPrivateUploadV2Enabled:
+    Fn::And:
+      - Condition: IsThnPrivateUploadV2StateProvisioned
+      - Fn::Equals:
+          - Ref: EnableThnPrivateUploadV2
+          - 'true'
 
 Globals:
   Function:
@@ -125,7 +231,8 @@ Resources:
   UploadAbuseTopic:
     Type: AWS::SNS::Topic
     Properties:
-      TopicName: zoolanding-image-upload-abuse-alerts
+      TopicName:
+        Ref: UploadAbuseTopicName
 
   UploadAbuseEmailSubscription1:
     Type: AWS::SNS::Subscription
@@ -149,6 +256,8 @@ Resources:
 
   ImageUploadFunction:
     Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
     Properties:
       CodeUri: .
       Handler: lambda_function.lambda_handler
@@ -235,10 +344,208 @@ Resources:
             Auth:
               Authorizer: AWS_IAM
 
+  ThnPrivateUploadTransactionsV2Table:
+    Type: AWS::DynamoDB::Table
+    Condition: IsThnPrivateUploadV2StateProvisioned
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: zoolanding-image-upload-test-ThnPrivateUploadTransactionsV2
+      BillingMode: PAY_PER_REQUEST
+      DeletionProtectionEnabled: true
+      PointInTimeRecoverySpecification:
+        PointInTimeRecoveryEnabled: true
+      SSESpecification:
+        SSEEnabled: true
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
+      TimeToLiveSpecification:
+        AttributeName: expiresAtEpoch
+        Enabled: true
+
+  ThnPrivateUploadV2Store:
+    Type: AWS::S3::Bucket
+    Condition: IsThnPrivateUploadV2StateProvisioned
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      BucketName:
+        Fn::Sub: zlp-thn-private-upload-test-${AWS::AccountId}-${AWS::Region}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      OwnershipControls:
+        Rules:
+          - ObjectOwnership: BucketOwnerEnforced
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      VersioningConfiguration:
+        Status: Enabled
+
+  ThnPrivateUploadV2StorePolicy:
+    Type: AWS::S3::BucketPolicy
+    Condition: IsThnPrivateUploadV2StateProvisioned
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      Bucket:
+        Ref: ThnPrivateUploadV2Store
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: '*'
+            Action: s3:*
+            Resource:
+              - Fn::GetAtt:
+                  - ThnPrivateUploadV2Store
+                  - Arn
+              - Fn::Sub: ${ThnPrivateUploadV2Store.Arn}/*
+            Condition:
+              Bool:
+                aws:SecureTransport: 'false'
+
+  ThnPrivateImageUploadV2Role:
+    Type: AWS::IAM::Role
+    Condition: IsThnPrivateUploadV2StateProvisioned
+    Properties:
+      RoleName: zoolanding-image-upload-test-ThnImageUploadV2Role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: ExactThnPrivateImageProcessing
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: ReadExactUploadTransaction
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  Fn::GetAtt:
+                    - ThnPrivateUploadTransactionsV2Table
+                    - Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    dynamodb:LeadingKeys:
+                      - UPLOAD_TX#test#thehairnarrative.com#journal-owner#*#thehairnarrative-com-journal
+              - Sid: ClaimAndFinalizeExactUploadTransaction
+                Effect: Allow
+                Action:
+                  - dynamodb:UpdateItem
+                Resource:
+                  Fn::GetAtt:
+                    - ThnPrivateUploadTransactionsV2Table
+                    - Arn
+                Condition:
+                  ForAllValues:StringLike:
+                    dynamodb:LeadingKeys:
+                      - UPLOAD_TX#test#thehairnarrative.com#journal-owner#*#thehairnarrative-com-journal
+                  StringEqualsIfExists:
+                    dynamodb:ReturnValues: NONE
+              - Sid: ReadExactThnServiceBinding
+                Effect: Allow
+                Action:
+                  - dynamodb:GetItem
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/zoolanding-content-hub-test-ServiceBindingRegistryV2
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys:
+                      - SERVICE_BINDING#test#thn-journal-test-v2
+              - Sid: FenceFinalUploadCommit
+                Effect: Allow
+                Action:
+                  - dynamodb:ConditionCheckItem
+                Resource:
+                  Fn::Sub: arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/zoolanding-content-hub-test-ServiceBindingRegistryV2
+                Condition:
+                  ForAllValues:StringEquals:
+                    dynamodb:LeadingKeys:
+                      - SERVICE_BINDING#test#thn-journal-test-v2
+                  StringEquals:
+                    dynamodb:EnclosingOperation: TransactWriteItems
+                  StringEqualsIfExists:
+                    dynamodb:ReturnValues: NONE
+              - Sid: WriteExactThnPrivateVariants
+                Effect: Allow
+                Action:
+                  - s3:PutObject
+                Resource:
+                  Fn::Sub: ${ThnPrivateUploadV2Store.Arn}/private/test/thehairnarrative.com/journal-owner/*/thehairnarrative-com-journal/*
+
+  ThnPrivateImageUploadV2Function:
+    Type: AWS::Serverless::Function
+    Condition: IsThnPrivateUploadV2StateProvisioned
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: .
+      Handler: private_upload_v2.lambda_handler
+      FunctionName: zoolanding-image-upload-test-ThnImageUploadV2
+      Description: Private TEST-only image processor for The Hair Narrative journal.
+      AutoPublishAlias: test
+      Role:
+        Fn::GetAtt:
+          - ThnPrivateImageUploadV2Role
+          - Arn
+      Timeout: 90
+      MemorySize: 2048
+      ReservedConcurrentExecutions:
+        Fn::If: [IsThnPrivateUploadV2Enabled, 2, 0]
+      EphemeralStorage:
+        Size: 1024
+      Environment:
+        Variables:
+          THN_PRIVATE_UPLOAD_TRANSACTION_TABLE_NAME:
+            Ref: ThnPrivateUploadTransactionsV2Table
+          THN_PRIVATE_UPLOAD_BUCKET_NAME:
+            Ref: ThnPrivateUploadV2Store
+          SERVICE_BINDING_REGISTRY_TABLE_NAME: zoolanding-content-hub-test-ServiceBindingRegistryV2
+          THN_CONTENT_HUB_DESCRIPTOR_VERSION_ID:
+            Ref: ThnContentHubV2DescriptorVersionId
+          THN_CONTENT_HUB_DESCRIPTOR_SHA256:
+            Ref: ThnContentHubV2DescriptorSha256
+          THN_CONTENT_HUB_AUTH_POLICY_VERSION:
+            Ref: ThnContentHubV2AuthPolicyVersion
+          LOG_LEVEL:
+            Ref: LogLevel
+
+  ThnPrivateImageUploadV2InvokePermission:
+    Type: AWS::Lambda::Permission
+    Condition: IsThnPrivateUploadV2Enabled
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName:
+        Ref: ThnPrivateImageUploadV2Function.Alias
+      Principal:
+        Fn::Sub: arn:${AWS::Partition}:iam::${AWS::AccountId}:role/zlp-thn-ch-test-authoring
+
   UploadGrantDeniedAlarm:
     Type: AWS::CloudWatch::Alarm
     Properties:
-      AlarmName: zoolanding-image-upload-grant-denied
+      AlarmName:
+        Ref: UploadGrantDeniedAlarmName
       AlarmDescription: Denied Zoolanding image upload grant attempts crossed the abuse threshold.
       Namespace:
         Ref: AbuseMetricNamespace
@@ -277,3 +584,15 @@ Outputs:
     Description: SNS topic for upload abuse alerts.
     Value:
       Ref: UploadAbuseTopic
+  ThnPrivateImageUploadV2FunctionArn:
+    Condition: IsThnPrivateUploadV2Enabled
+    Description: Exact private TEST-only THN image processor ARN.
+    Value:
+      Fn::GetAtt:
+        - ThnPrivateImageUploadV2Function
+        - Arn
+  ThnPrivateUploadTransactionsV2TableName:
+    Condition: IsThnPrivateUploadV2StateProvisioned
+    Description: Retained exact-key THN private upload transaction table.
+    Value:
+      Ref: ThnPrivateUploadTransactionsV2Table
