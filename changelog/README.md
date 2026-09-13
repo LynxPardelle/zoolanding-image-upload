@@ -8,3 +8,4 @@ Chronological implementation, QA, and release evidence lives here. Use the repos
 - [2026-09-08 — TEST change-set response compatibility](2026-09-08-test-change-set-response-contract.md)
 - [2026-09-08 — Private retained THN TEST lifecycle reconciliation](2026-09-08-thn-retained-test-lifecycle.md)
 - [2026-09-10 — Credential-free TEST source promotion](2026-09-10-test-validation-only.md)
+- [2026-09-10 — Private CREATE transport metadata comparison](2026-09-10-private-create-transport-metadata.md)
