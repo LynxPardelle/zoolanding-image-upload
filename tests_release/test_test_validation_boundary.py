@@ -142,9 +142,10 @@ class TestValidationBoundaryTests(unittest.TestCase):
                                            "source_sha": SHA, "service": SERVICE, "run_id": "123"}), encoding="utf-8")
         self.assertEqual(self.run_python(script, "123", SHA, SERVICE).returncode, 0)
 
-    def test_private_execution_and_legacy_rollback_remain_unchanged(self):
+    def test_reviewed_private_recovery_and_legacy_rollback_are_pinned(self):
         for name, expected in {
-            "deploy-thn-test.yml": "7ae631b29f3718ae587b6550395c0fe275f57ff2b505d96232188b3ff1004268",
+            # Approved resume-create selection/transport only; legacy rollback stays byte-identical.
+            "deploy-thn-test.yml": "908deed37c96f370b41d43341ef84bd95e458bb2863dd83b9c24c11de4c101e8",
             "rollback-test.yml": "9c3fe2474c61a3821fe840d47163256f4a6841c657159d5ff92d59bb2f1e498c",
         }.items():
             with self.subTest(workflow=name):
