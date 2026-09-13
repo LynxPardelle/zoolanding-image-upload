@@ -91,7 +91,12 @@ def capture(session, account, seal, *, final=False):
         blocked("parameters_changed")
     templates = {stage: release._load_template(cfn.get_template(StackName=stack["StackId"], TemplateStage=stage)["TemplateBody"])
                  for stage in ("Original", "Processed")}
-    if (digest(templates["Original"]) != seal["originalSha256"]
+    # UsePreviousTemplate may persist the exact previously processed document.
+    # This representation is allowed only after recovery, never at initial capture.
+    original_hashes = {seal["originalSha256"]}
+    if final:
+        original_hashes.add(seal["processedSha256"])
+    if (digest(templates["Original"]) not in original_hashes
             or digest(templates["Processed"]) != seal["processedSha256"]):
         blocked("template_changed")
     release.verify_private_processed(templates["Processed"])
@@ -148,7 +153,8 @@ def review(description, original, processed, baseline, seal, account, name, chan
             or description.get("RoleARN", release.cloudformation_role(account)) != release.cloudformation_role(account)
             or description.get("OnStackFailure") is not None
             or release.ordinary_review._parameter_map(description.get("Parameters")) != baseline["values"]
-            or original != baseline["templates"]["Original"] or processed != baseline["templates"]["Processed"]):
+            or original not in (baseline["templates"]["Original"], baseline["templates"]["Processed"])
+            or processed != baseline["templates"]["Processed"]):
         blocked("change_set_mismatch")
     expected = {seal["versionLogicalId"]: "AWS::Lambda::Version", ALIAS: "AWS::Lambda::Alias"}
     changes, seen = description.get("Changes"), set()
@@ -157,9 +163,17 @@ def review(description, original, processed, baseline, seal, account, name, chan
     for change in changes:
         r = change.get("ResourceChange", {})
         key = r.get("LogicalResourceId")
+        # Native retry labels this no-ID failed Version as a replacement. No
+        # existing physical resource can enter this exception, including an alias.
+        failed_version = baseline["inventory"].get(key, {})
+        retry_failed_version = (key == seal["versionLogicalId"] and r.get("Action") == "Modify"
+                                and r.get("Replacement") == "True"
+                                and failed_version.get("ResourceStatus") == "CREATE_FAILED"
+                                and not failed_version.get("PhysicalResourceId"))
         if (change.get("Type") != "Resource" or key not in expected or key in seen
                 or r.get("ResourceType") != expected[key] or r.get("PhysicalResourceId")
-                or r.get("Replacement") not in {None, "False"} or r.get("ChangeSetId") or r.get("ModuleInfo")
+                or (r.get("Replacement") not in {None, "False"} and not retry_failed_version)
+                or r.get("ChangeSetId") or r.get("ModuleInfo")
                 or r.get("Action") not in ({"Add", "Modify"} if key == seal["versionLogicalId"] else {"Add"})):
             blocked("destructive_or_unrelated_change")
         seen.add(key)

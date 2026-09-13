@@ -69,7 +69,23 @@ and native review immediately before execution. The update uses the previous
 template and previous parameter values, the same execution role, and
 `DisableRollback=true`; no `OnStackFailure` is supplied on that new change set.
 Only the failed Version with no physical ID and the absent alias may complete.
-No replacement, removal, existing-resource update or invocation grant is accepted.
+No retained-resource replacement, removal, existing-resource update or invocation
+grant is accepted.
+
+The observed native retry has two narrowly validated representations. With
+`UsePreviousTemplate`, change-set Original may equal the sealed previous Processed
+document exactly; Processed must still match that same seal. Final stack Original
+may retain either exact representation, but the initial failed-stack Original
+must still match its original source seal. No template field is ignored.
+
+CloudFormation can classify the failed Version as Modify/Replacement=True even
+though it has no physical ID. That classification is accepted only for the
+sealed Version whose baseline status is CREATE_FAILED and has no physical ID,
+with no physical ID in the native change either. Alias replacement, a successful
+or existing Version, foreign resources, removals and additional changes remain
+blocked. This is completion of a failed allocation, not replacement of a retained
+resource. Independent pre-execution observation must confirm no previously
+published Version; the release does not gain any new enumeration permission.
 
 Preflight verifies stack identity/options/protection, exact templates, parameters,
 five retained IDs, function configuration and code hash, closed concurrency,
