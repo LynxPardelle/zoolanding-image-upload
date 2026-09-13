@@ -39,6 +39,7 @@ ENABLE = "EnableThnPrivateUploadV2"
 STATE = "ProvisionThnPrivateUploadV2State"
 GATE = "ThnPrivateUploadV2TerminationProtectionGate"
 OPERATIONS = frozenset({"create", "provision", "enable", "disable"})
+DISPATCH_OPERATIONS = OPERATIONS | {"resume-create"}
 STATE_TYPES = frozenset({"AWS::DynamoDB::Table", "AWS::S3::Bucket", "AWS::S3::BucketPolicy"})
 PERSISTENT_RUNTIME_TYPES = frozenset({"AWS::Lambda::Function", "AWS::Lambda::Alias", "AWS::IAM::Role"})
 REMOVABLE_TYPES = frozenset({"AWS::Lambda::Permission"})
@@ -636,10 +637,17 @@ def _verify_retained_state(session: Any, inventory: dict, template: dict, accoun
 def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
     """Run a TEST-only update; the caller must first verify the immutable artifact."""
     validate_context(env)
-    if operation not in OPERATIONS or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", env.get("ARTIFACTS_BUCKET", "")):
+    if operation not in DISPATCH_OPERATIONS or not re.fullmatch(r"[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]", env.get("ARTIFACTS_BUCKET", "")):
         raise ReleaseBlocked("release_inputs_invalid")
     identity = session.client("sts", region_name=REGION).get_caller_identity()
     validate_deploy_identity(identity)
+    if operation == "resume-create":
+        from tools import thn_image_recovery
+        try:
+            return thn_image_recovery.run(session, env, identity["Account"], thn_image_recovery.APPROVED_BASELINE)
+        except thn_image_recovery.release.ReleaseBlocked as error:
+            # Direct script execution and package import have distinct class objects.
+            raise ReleaseBlocked(str(error)) from None
     cfn = session.client("cloudformation", region_name=REGION)
     if operation == "create":
         # Check identity and exact absence before packaging can upload an artifact.
@@ -753,7 +761,7 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--operation", choices=sorted(OPERATIONS), required=True)
+    parser.add_argument("--operation", choices=sorted(DISPATCH_OPERATIONS), required=True)
     parser.add_argument("--build", type=Path, default=Path(".aws-sam/build"))
     args = parser.parse_args()
     try:

@@ -31,6 +31,7 @@ source-validation pipeline.
 | Operation | Allowed effect | Mandatory boundary |
 | --- | --- | --- |
 | `create` | Create the exact absent TEST stack with seven private active resources | Exact account/stack absence, protected empty placeholder, no v1 resources or active binding |
+| `resume-create` | Complete only the failed Version and missing alias in the sealed partial TEST stack | Exact five-resource baseline, unchanged code/templates/options, no replacement, zero concurrency; recovery verification defaults to no execution |
 | `provision` | Reconcile retained private state/runtime in an existing protected stack | Preserve live shared resources/parameters; no entry permission; concurrency zero |
 | `enable` | Add the single alias-qualified Hub-authoring invoke permission; concurrency two | Matching active registry descriptor/scope/bindings, writers disabled, enabled protected Auth, real Hub authoring role |
 | `disable` | Remove that exact entry permission and set concurrency zero | Ledger already closed and epoch advanced; keep state, function, role, alias and retained versions |
@@ -49,6 +50,45 @@ cleanup or protection bypass. Template, parameter, identity, inventory and
 retained-state checks are unchanged.
 
 This follows the native [CreateChangeSet contract](https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_CreateChangeSet.html) and [termination-protection states](https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/using-cfn-protect-stacks.html). `OnStackFailure` is a CreateChangeSet field, not an ExecuteChangeSet argument.
+
+## Sealed partial CREATE recovery
+
+The failed private create is not an absent stack. Never repeat `create`, remove
+protection or delete retained resources to retry it. `resume-create` is restricted
+to the exact CREATE_FAILED baseline sealed in `tools/thn_image_recovery.py`.
+Its runtime source is the original accepted release; the newer release artifact
+transports the recovery tool but is never repackaged or uploaded as runtime code.
+
+First apply the owning Infra correction for the existing Image executor's
+`lambda:ListVersionsByFunction` on its one private function. This is not permission
+to enable the blog or apply broader service policies.
+
+The manual workflow's `recovery_execution` defaults to `verify`: create and review
+an UPDATE change set without execution. For `execute`, repeat the sealed readback
+and native review immediately before execution. The update uses the previous
+template and previous parameter values, the same execution role, and
+`DisableRollback=true`; no `OnStackFailure` is supplied on that new change set.
+Only the failed Version with no physical ID and the absent alias may complete.
+No replacement, removal, existing-resource update or invocation grant is accepted.
+
+Preflight verifies stack identity/options/protection, exact templates, parameters,
+five retained IDs, function configuration and code hash, closed concurrency,
+missing alias and private storage controls. Final readback repeats three times,
+requires UPDATE_COMPLETE and exactly seven resources, preserves all five IDs,
+and binds the alias to the completed Version and its unchanged code hash.
+Ordinary lifecycle validators still reject partial inventories/failed stacks.
+
+An independent operator read must verify absence of Lambda invocation policies
+before and after recovery; the GitHub caller is not granted additional policy-read
+authority by this patch. Zero concurrency and no native invocation-permission
+change remain mandatory in the workflow. This check must not be called blog activation.
+
+Failures stop without automatic cleanup. Verification can leave an unexecuted
+change set for review, not a new running service; CloudFormation removes obsolete
+change sets when an update executes. Retained storage keeps normal AWS billing.
+No temporary service, schedule, account or customer access is created here.
+
+See [ExecuteChangeSet preservation](https://docs.aws.amazon.com/AWSCloudFormation/latest/APIReference/API_ExecuteChangeSet.html).
 
 ## Native closure and retained rollback
 

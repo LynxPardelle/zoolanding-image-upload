@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 class ReleaseArtifactTests(unittest.TestCase):
     def test_standalone_package_contains_every_imported_tool_and_help_is_offline(self):
         workflow = (ROOT / ".github/workflows/deploy-thn-test.yml").read_text()
-        tools = ("__init__.py", "thn_test_release.py", "prepare_test_parameters.py", "review_test_change_set.py")
+        tools = ("__init__.py", "thn_test_release.py", "thn_image_recovery.py", "prepare_test_parameters.py", "review_test_change_set.py")
         with tempfile.TemporaryDirectory(prefix="thn-release-contract-") as temporary:
             target = Path(temporary)
             (target / "tools").mkdir()
@@ -25,6 +25,9 @@ class ReleaseArtifactTests(unittest.TestCase):
                                     cwd=temporary, text=True, capture_output=True, check=False)
             self.assertEqual(result.returncode, 0, result.stderr)
             self.assertIn("--operation", result.stdout)
+            loaded = subprocess.run([sys.executable, "-c", "from tools.thn_image_recovery import APPROVED_BASELINE; assert len(APPROVED_BASELINE) == 11"],
+                                    cwd=temporary, text=True, capture_output=True, check=False)
+            self.assertEqual(loaded.returncode, 0, loaded.stderr)
 
     def test_manifest_verification_precedes_credentials_and_register_is_credential_free(self):
         workflow = (ROOT / ".github/workflows/deploy-thn-test.yml").read_text()

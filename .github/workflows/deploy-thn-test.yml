@@ -9,7 +9,13 @@ on:
         description: Private-only protected CREATE, retained provisioning, enablement, or retained-runtime disablement
         required: true
         type: choice
-        options: [create, provision, enable, disable]
+        options: [create, provision, enable, disable, resume-create]
+      recovery_execution:
+        description: For resume-create only, review without execution or execute the exact retained recovery
+        required: true
+        type: choice
+        options: [verify, execute]
+        default: verify
       expected_source_sha:
         description: Reviewed full commit SHA already promoted to TEST
         required: true
@@ -85,7 +91,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .aws-sam/build/release-tools/tools
-          cp tools/__init__.py tools/thn_test_release.py tools/prepare_test_parameters.py tools/review_test_change_set.py .aws-sam/build/release-tools/tools/
+          cp tools/__init__.py tools/thn_test_release.py tools/thn_image_recovery.py tools/prepare_test_parameters.py tools/review_test_change_set.py .aws-sam/build/release-tools/tools/
           cp requirements-release.txt .aws-sam/build/release-tools/
           python - <<'PY'
           import json, os
@@ -170,6 +176,7 @@ jobs:
       - name: Validate operation and selection before AWS credentials
         env:
           THN_OPERATION: ${{ inputs.operation }}
+          THN_RECOVERY_EXECUTION: ${{ inputs.recovery_execution }}
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
           THN_V2_TEST_PARAMETERS_JSON: ${{ vars.THN_V2_TEST_PARAMETERS_JSON }}
         run: |
@@ -178,6 +185,11 @@ jobs:
           sys.path.insert(0, '.aws-sam/build/release-tools')
           from tools.thn_test_release import validate_context, lifecycle_parameters
           validate_context(dict(os.environ))
+          if os.environ['THN_OPERATION'] == 'resume-create':
+              if os.environ.get('THN_RECOVERY_EXECUTION') not in {'verify', 'execute'}:
+                  raise SystemExit('recovery_execution_required')
+              from tools.thn_image_recovery import APPROVED_BASELINE
+              raise SystemExit(0)
           lifecycle_parameters({'StackId': 'arn:aws:cloudformation:us-east-1:' + os.environ['AWS_ROLE_ARN'].split(':')[4] + ':stack/zoolanding-image-upload-test/preflight', 'Parameters': [
             {'ParameterKey': 'ProvisionThnPrivateUploadV2State', 'ParameterValue': 'true'},
             {'ParameterKey': 'EnableThnPrivateUploadV2', 'ParameterValue': 'false'}]},
@@ -190,6 +202,7 @@ jobs:
       - name: Execute one reviewed THN-only retained-state operation
         env:
           THN_OPERATION: ${{ inputs.operation }}
+          THN_RECOVERY_EXECUTION: ${{ inputs.recovery_execution }}
           THN_V2_TEST_PARAMETERS_JSON: ${{ vars.THN_V2_TEST_PARAMETERS_JSON }}
           ARTIFACTS_BUCKET: ${{ vars.SAM_ARTIFACTS_BUCKET }}
         run: python .aws-sam/build/release-tools/tools/thn_test_release.py --operation "$THN_OPERATION"
