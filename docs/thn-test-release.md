@@ -91,6 +91,9 @@ The change set, registry dependencies, protected stack, closed pre-state,
 resource inventory, no-replacement review and final concurrency/alias checks
 remain mandatory. Any other template state fails closed; this exception does
 not apply to other drafts, provision, disable or production.
+If the native change-set Original differs, the release fails and reports only
+the first structural field path, never the compared values. Treat that path as
+diagnostic evidence; do not repeat or loosen the equality guard blindly.
 
 CloudFormation can classify the failed Version as Modify/Replacement=True even
 though it has no physical ID. That classification is accepted only for the
