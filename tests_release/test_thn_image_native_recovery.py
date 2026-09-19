@@ -1,12 +1,13 @@
 """Observed native recovery representations, with synthetic provider values only."""
 from copy import deepcopy
+from pathlib import Path
 import unittest
 from unittest.mock import patch
 
 from tools import thn_image_recovery as recovery
 from tools import thn_test_release as release
 from test_thn_image_recovery import RecoveryServices, fixture_seal
-from test_thn_test_release import ACCOUNT, FUNCTION
+from test_thn_test_release import ACCOUNT, ACCOUNT_HASH, FUNCTION, selection
 
 
 class NativeRecoveryServices(RecoveryServices):
@@ -65,6 +66,48 @@ class NativeRecoveryTests(unittest.TestCase):
                 with self.subTest(enabled=enabled, original=original.get('Description')):
                     with self.assertRaises(release.ReleaseBlocked):
                         release.recovered_native_enable_template(original, processed, enabled)
+
+    def test_recovered_native_enable_uses_existing_template_without_s3_upload(self):
+        self.session.executed = True
+        original_get_template = self.session.get_template
+
+        def native_get_template(**kwargs):
+            result = original_get_template(**kwargs)
+            result['TemplateBody'].pop('Globals', None)
+            return result
+
+        self.session.get_template = native_get_template
+        native = native_get_template(TemplateStage='Original')['TemplateBody']
+        env = {**self.env, 'ARTIFACTS_BUCKET': 'example-artifacts',
+               'GITHUB_REPOSITORY': 'LynxPardelle/zoolanding-image-upload',
+               'GITHUB_REF': 'refs/heads/test', 'GITHUB_EVENT_NAME': 'workflow_dispatch',
+               'EXPECTED_SOURCE_SHA': self.env['GITHUB_SHA'], 'AWS_REGION': 'us-east-1',
+               'AWS_DEFAULT_REGION': 'us-east-1', 'THN_V2_TEST_PARAMETERS_JSON': selection()}
+        self.session.get_caller_identity = lambda: {'Account': ACCOUNT,
+            'Arn': f'arn:aws:sts::{ACCOUNT}:assumed-role/zoolanding-deployer-image-upload-test-github-deploy/synthetic'}
+        requests = []
+
+        class StopAfterTransport(Exception):
+            pass
+
+        def capture_change_set(**kwargs):
+            requests.append(kwargs)
+            raise StopAfterTransport
+
+        self.session.create_change_set = capture_change_set
+        self.session.calls.clear()
+        with patch.object(release, 'ACCOUNT_HASH', ACCOUNT_HASH), \
+                patch.dict(recovery.APPROVED_BASELINE, {'processedSha256': recovery.digest(native)}), \
+                patch.object(release, 'verify_dependencies', return_value='reviewed-dependencies'), \
+                patch.object(release, '_inventory', return_value={}), \
+                patch.object(release, '_verify_retained_state'), \
+                patch.object(release, 'verify_runtime'):
+            with self.assertRaises(StopAfterTransport):
+                release.run_release(self.session, env, Path('unused'), 'enable')
+        self.assertEqual(len(requests), 1)
+        self.assertIs(requests[0].get('UsePreviousTemplate'), True)
+        self.assertNotIn('TemplateURL', requests[0])
+        self.assertFalse(any(name == 'put_object' for name, _ in self.session.calls))
 
     def test_observed_native_change_and_persisted_template_complete_recovery(self):
         result = self.run_recovery()
