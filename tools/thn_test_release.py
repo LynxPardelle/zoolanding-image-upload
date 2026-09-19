@@ -342,6 +342,31 @@ def _load_template(body: Any) -> dict:
     return result
 
 
+def template_mismatch_location(expected: Any, actual: Any) -> str:
+    """Report a structural path only; never include template values in logs."""
+    def walk(left: Any, right: Any, path: list[str]) -> list[str] | None:
+        if left == right:
+            return None
+        if isinstance(left, dict) and isinstance(right, dict):
+            for key in sorted(set(left) | set(right), key=str):
+                segment = key if isinstance(key, str) and re.fullmatch(r"[A-Za-z][A-Za-z0-9_]{0,79}", key) else "field"
+                if key not in left or key not in right:
+                    return path + [segment]
+                child = walk(left[key], right[key], path + [segment])
+                if child is not None:
+                    return child
+        if isinstance(left, list) and isinstance(right, list):
+            for before_item, after_item in zip(left, right):
+                child = walk(before_item, after_item, path + ["item"])
+                if child is not None:
+                    return child
+            return path + ["item"]
+        return path or ["root"]
+
+    difference = walk(expected, actual, [])
+    return "/".join(difference[:6]) if difference is not None else "none"
+
+
 def _inventory(cfn: Any, stack_id: str = STACK) -> dict[str, dict]:
     result = {}
     token = None
@@ -746,7 +771,7 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
         candidate_original = _load_template(cfn.get_template(StackName=STACK, ChangeSetName=change_id, TemplateStage="Original")["TemplateBody"])
         candidate_processed = _load_template(cfn.get_template(StackName=STACK, ChangeSetName=change_id, TemplateStage="Processed")["TemplateBody"])
         if candidate_original != template:
-            raise ReleaseBlocked("change_set_template_hash_mismatch")
+            raise ReleaseBlocked("change_set_template_hash_mismatch:" + template_mismatch_location(template, candidate_original))
         verify_processed(live_processed, candidate_processed)
         decision = review_change_set(description, change_id, name, parameters, operation)
         if decision == "noop":

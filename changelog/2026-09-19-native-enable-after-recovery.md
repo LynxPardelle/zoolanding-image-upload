@@ -13,6 +13,9 @@ and changes only reviewed lifecycle parameters. All existing dependency,
 change-set, retained-resource, alias and concurrency checks remain in force.
 Unknown source or live-template drift fails closed.
 
-This source fix is not an AWS execution or blog activation. The next TEST
-release still requires its own reviewed source promotion and one controlled
-`enable` run.
+The reviewed source was promoted to TEST and one controlled `enable` run stopped
+before execution at `change_set_template_hash_mismatch`. The stack remained
+protected and disabled, and the unexecuted change set was removed. The release
+now reports only the structural path of the first mismatched template field;
+it never logs either value. This is diagnosis, not a relaxed comparison or blog
+activation. Do not repeat `enable` until that path is reviewed.
