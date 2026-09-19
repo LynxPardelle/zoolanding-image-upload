@@ -50,6 +50,22 @@ class NativeRecoveryTests(unittest.TestCase):
         with patch.object(recovery.time, 'sleep'):
             return recovery.run(self.session, self.env, ACCOUNT, self.seal)
 
+    def test_enable_reuses_only_the_exact_sealed_native_template(self):
+        native = self.session.get_template(TemplateStage='Processed')['TemplateBody']
+        native.pop('Globals', None)
+        with patch.dict(recovery.APPROVED_BASELINE, {'processedSha256': recovery.digest(native)}):
+            result = release.recovered_native_enable_template(native, native, 'false')
+            self.assertEqual(result, native)
+            self.assertIsNot(result, native)
+            for original, processed, enabled in (
+                    ({**native, 'Description': 'unreviewed'}, native, 'false'),
+                    (native, {**native, 'Description': 'unreviewed'}, 'false'),
+                    (native, native, 'true'),
+                    ({**native, 'Transform': 'AWS::Serverless-2016-10-31'}, native, 'false')):
+                with self.subTest(enabled=enabled, original=original.get('Description')):
+                    with self.assertRaises(release.ReleaseBlocked):
+                        release.recovered_native_enable_template(original, processed, enabled)
+
     def test_observed_native_change_and_persisted_template_complete_recovery(self):
         result = self.run_recovery()
         self.assertEqual(result['decision'], 'executed')

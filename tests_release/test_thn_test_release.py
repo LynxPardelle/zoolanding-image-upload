@@ -75,6 +75,20 @@ class ImageLifecycleReleaseTests(unittest.TestCase):
         self.tool = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(self.tool)
 
+    def test_enable_source_delta_accepts_only_reviewed_release_files(self):
+        self.tool.verify_enable_source_delta(['tools/thn_test_release.py', 'docs/thn-test-release.md'])
+        for paths in ([], ['template.yaml'], ['lambda_function.py'],
+                      ['tools/thn_test_release.py', 'requirements.txt']):
+            with self.subTest(paths=paths), self.assertRaises(self.tool.ReleaseBlocked):
+                self.tool.verify_enable_source_delta(paths)
+
+    def test_enable_source_delta_is_checked_before_artifact_and_aws_credentials(self):
+        workflow = (ROOT / '.github/workflows/deploy-thn-test.yml').read_text()
+        self.assertIn('Verify native enable source boundary', workflow)
+        self.assertIn('verify_enable_source_delta', workflow)
+        self.assertLess(workflow.index('Verify native enable source boundary'),
+                        workflow.index('Validate and build without AWS credentials'))
+
     def test_provision_preserves_every_shared_parameter_without_readback(self):
         result = self.tool.lifecycle_parameters(stack(), "provision", None)
         actual = {p["ParameterKey"]: p for p in result}

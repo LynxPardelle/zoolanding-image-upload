@@ -39,6 +39,22 @@ ENABLE = "EnableThnPrivateUploadV2"
 STATE = "ProvisionThnPrivateUploadV2State"
 GATE = "ThnPrivateUploadV2TerminationProtectionGate"
 OPERATIONS = frozenset({"create", "provision", "enable", "disable"})
+PROVISIONED_SOURCE_SHA = "01f1a851b5d33a69b11e6aa98e28a44e08c4eaba"
+ENABLE_SOURCE_DELTA_FILES = frozenset({
+    ".github/workflows/deploy-thn-test.yml",
+    "changelog/2026-09-13-native-image-recovery-review.md",
+    "changelog/2026-09-13-retained-image-recovery.md",
+    "changelog/2026-09-19-native-enable-after-recovery.md",
+    "changelog/README.md",
+    "docs/thn-test-release.md",
+    "tests_release/test_release_artifact.py",
+    "tests_release/test_test_validation_boundary.py",
+    "tests_release/test_thn_image_native_recovery.py",
+    "tests_release/test_thn_image_recovery.py",
+    "tests_release/test_thn_test_release.py",
+    "tools/thn_image_recovery.py",
+    "tools/thn_test_release.py",
+})
 DISPATCH_OPERATIONS = OPERATIONS | {"resume-create"}
 STATE_TYPES = frozenset({"AWS::DynamoDB::Table", "AWS::S3::Bucket", "AWS::S3::BucketPolicy"})
 PERSISTENT_RUNTIME_TYPES = frozenset({"AWS::Lambda::Function", "AWS::Lambda::Alias", "AWS::IAM::Role"})
@@ -176,6 +192,27 @@ def _thn_key(section: str, key: str) -> bool:
     if section == "Resources":
         return key in RESOURCE_TYPES
     return key.startswith(PREFIX)
+
+
+def verify_enable_source_delta(paths: list[str]) -> None:
+    """A native enable cannot silently ship changes to the sealed runtime source."""
+    if (not isinstance(paths, list) or not paths
+            or any(not isinstance(path, str) or path not in ENABLE_SOURCE_DELTA_FILES for path in paths)
+            or len(paths) != len(set(paths))):
+        raise ReleaseBlocked("thn_runtime_source_changed")
+
+
+def recovered_native_enable_template(original: dict, processed: dict, enabled: str) -> dict:
+    """Reuse only the exact native template sealed before retained CREATE recovery."""
+    from tools.thn_image_recovery import APPROVED_BASELINE
+    if (enabled != "false" or not isinstance(original, dict) or not isinstance(processed, dict)
+            or original != processed
+            or any(key in original for key in ("Transform", "Globals", "Mappings"))
+            or hashlib.sha256(json.dumps(original, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+            != APPROVED_BASELINE["processedSha256"]):
+        raise ReleaseBlocked("recovered_native_enable_baseline_mismatch")
+    verify_private_processed(original)
+    return deepcopy(original)
 
 
 def compose_template(candidate: dict, previous: dict, operation: str = "enable") -> dict:
@@ -671,8 +708,11 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
         _verify_retained_state(session, initial_inventory, previous, identity["Account"])
         verify_runtime(session, initial_inventory, _parameters(before).get(ENABLE) == "true", identity["Account"])
     prefix = f"{STACK}/thn/{env['GITHUB_RUN_ID']}/{env['GITHUB_RUN_ATTEMPT']}/{env['GITHUB_SHA']}"
-    candidate = previous if operation == "disable" else _package_template(build, env["ARTIFACTS_BUCKET"], prefix)
-    template = compose_template(candidate, previous, operation)
+    if operation == "enable" and previous.get("Transform") is None:
+        template = recovered_native_enable_template(previous, live_processed, _parameters(before).get(ENABLE))
+    else:
+        candidate = previous if operation == "disable" else _package_template(build, env["ARTIFACTS_BUCKET"], prefix)
+        template = compose_template(candidate, previous, operation)
     expected_readback = effective_parameters(template, _parameters(before), parameters)
     serialized = json.dumps(template, sort_keys=True, separators=(",", ":")).encode()
     key = prefix + "/template-" + hashlib.sha256(serialized).hexdigest() + ".json"

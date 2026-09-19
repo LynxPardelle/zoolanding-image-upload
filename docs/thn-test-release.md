@@ -78,6 +78,20 @@ document exactly; Processed must still match that same seal. Final stack Origina
 may retain either exact representation, but the initial failed-stack Original
 must still match its original source seal. No template field is ignored.
 
+For a later `enable` of that recovered stack, CloudFormation can retain the
+sealed Processed document as its Original template. The ordinary SAM source
+merge cannot compare its Transform/Globals to this native representation.
+The dedicated enable path therefore reuses that native template **only** when
+both live stages are identical to the sealed Processed hash, the private
+resource/retention checks pass, and the current enable parameter is false.
+Before AWS credentials, the workflow also compares TEST source to the original
+private CREATE commit and rejects any change outside its reviewed release,
+test and documentation file list. No runtime code is repackaged in this path.
+The change set, registry dependencies, protected stack, closed pre-state,
+resource inventory, no-replacement review and final concurrency/alias checks
+remain mandatory. Any other template state fails closed; this exception does
+not apply to other drafts, provision, disable or production.
+
 CloudFormation can classify the failed Version as Modify/Replacement=True even
 though it has no physical ID. That classification is accepted only for the
 sealed Version whose baseline status is CREATE_FAILED and has no physical ID,
