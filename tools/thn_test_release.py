@@ -733,22 +733,26 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
         _verify_retained_state(session, initial_inventory, previous, identity["Account"])
         verify_runtime(session, initial_inventory, _parameters(before).get(ENABLE) == "true", identity["Account"])
     prefix = f"{STACK}/thn/{env['GITHUB_RUN_ID']}/{env['GITHUB_RUN_ATTEMPT']}/{env['GITHUB_SHA']}"
-    if operation == "enable" and previous.get("Transform") is None:
+    reuse_live_template = operation == "enable" and previous.get("Transform") is None
+    if reuse_live_template:
         template = recovered_native_enable_template(previous, live_processed, _parameters(before).get(ENABLE))
     else:
         candidate = previous if operation == "disable" else _package_template(build, env["ARTIFACTS_BUCKET"], prefix)
         template = compose_template(candidate, previous, operation)
     expected_readback = effective_parameters(template, _parameters(before), parameters)
     serialized = json.dumps(template, sort_keys=True, separators=(",", ":")).encode()
-    key = prefix + "/template-" + hashlib.sha256(serialized).hexdigest() + ".json"
-    session.client("s3", region_name=REGION).put_object(Bucket=env["ARTIFACTS_BUCKET"], Key=key,
-        Body=serialized, ContentType="application/json", ServerSideEncryption="AES256",
-        ExpectedBucketOwner=identity["Account"])
     name = f"thn-{env['GITHUB_RUN_ID']}-{env['GITHUB_RUN_ATTEMPT']}"
     arguments = {"StackName": STACK, "ChangeSetName": name, "ChangeSetType": "UPDATE",
-        "TemplateURL": f"https://s3.{REGION}.amazonaws.com/{env['ARTIFACTS_BUCKET']}/{key}",
         "Parameters": parameters, "Capabilities": ["CAPABILITY_IAM", "CAPABILITY_NAMED_IAM"],
         "Description": f"THN TEST {operation} source {env['GITHUB_SHA']}", "ClientToken": name}
+    if reuse_live_template:
+        arguments["UsePreviousTemplate"] = True
+    else:
+        key = prefix + "/template-" + hashlib.sha256(serialized).hexdigest() + ".json"
+        session.client("s3", region_name=REGION).put_object(Bucket=env["ARTIFACTS_BUCKET"], Key=key,
+            Body=serialized, ContentType="application/json", ServerSideEncryption="AES256",
+            ExpectedBucketOwner=identity["Account"])
+        arguments["TemplateURL"] = f"https://s3.{REGION}.amazonaws.com/{env['ARTIFACTS_BUCKET']}/{key}"
     arguments["RoleARN"] = execution_role
     created = cfn.create_change_set(**arguments)
     change_id = created.get("Id")

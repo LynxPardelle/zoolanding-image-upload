@@ -84,6 +84,11 @@ merge cannot compare its Transform/Globals to this native representation.
 The dedicated enable path therefore reuses that native template **only** when
 both live stages are identical to the sealed Processed hash, the private
 resource/retention checks pass, and the current enable parameter is false.
+It creates the parameter-only change set with `UsePreviousTemplate=true`, not
+by uploading and resubmitting the native document through `TemplateURL`.
+This avoids changing the representation of the retained function properties
+while leaving the exact Original/Processed comparison mandatory. The ordinary
+SAM source path and all other operations keep their existing transport.
 Before AWS credentials, the workflow also compares TEST source to the original
 private CREATE commit and rejects any change outside its reviewed release,
 test and documentation file list. No runtime code is repackaged in this path.

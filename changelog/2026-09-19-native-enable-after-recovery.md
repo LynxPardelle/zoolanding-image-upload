@@ -19,3 +19,10 @@ protected and disabled, and the unexecuted change set was removed. The release
 now reports only the structural path of the first mismatched template field;
 it never logs either value. This is diagnosis, not a relaxed comparison or blog
 activation. Do not repeat `enable` until that path is reviewed.
+
+The next local correction targets the observed Function `Properties` path:
+for the exact sealed native stack, `enable` uses CloudFormation's existing
+template with new lifecycle parameters. It does not upload another template
+object. A local regression test verifies this transport decision before a
+change set is created. This paragraph records source preparation only; it is
+not evidence that a further TEST enable succeeded.
