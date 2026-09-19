@@ -89,6 +89,14 @@ class ImageLifecycleReleaseTests(unittest.TestCase):
         self.assertLess(workflow.index('Verify native enable source boundary'),
                         workflow.index('Validate and build without AWS credentials'))
 
+    def test_template_mismatch_location_reports_structure_not_values(self):
+        expected = {'Resources': {'SafeResource': {'Properties': {'Code': 'private-value'}}}}
+        actual = {'Resources': {'SafeResource': {'Properties': {'Code': 'another-private-value'}}}}
+        location = self.tool.template_mismatch_location(expected, actual)
+        self.assertEqual(location, 'Resources/SafeResource/Properties/Code')
+        self.assertNotIn('private-value', location)
+        self.assertEqual(self.tool.template_mismatch_location(expected, expected), 'none')
+
     def test_provision_preserves_every_shared_parameter_without_readback(self):
         result = self.tool.lifecycle_parameters(stack(), "provision", None)
         actual = {p["ParameterKey"]: p for p in result}
