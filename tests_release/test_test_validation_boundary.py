@@ -144,8 +144,8 @@ class TestValidationBoundaryTests(unittest.TestCase):
 
     def test_reviewed_private_recovery_and_legacy_rollback_are_pinned(self):
         for name, expected in {
-            # Approved resume-create selection/transport only; legacy rollback stays byte-identical.
-            "deploy-thn-test.yml": "908deed37c96f370b41d43341ef84bd95e458bb2863dd83b9c24c11de4c101e8",
+            # Reviewed dedicated THN lifecycle transport; legacy rollback stays byte-identical.
+            "deploy-thn-test.yml": "60cbe7148f4a6d3207ca2c150e3ca8d7f34a0b2df764ee87971a04c2db12b1a6",
             "rollback-test.yml": "9c3fe2474c61a3821fe840d47163256f4a6841c657159d5ff92d59bb2f1e498c",
         }.items():
             with self.subTest(workflow=name):

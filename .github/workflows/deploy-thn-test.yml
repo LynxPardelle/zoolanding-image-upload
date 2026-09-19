@@ -68,6 +68,18 @@ jobs:
           [[ "$EXPECTED_SOURCE_SHA" =~ ^[a-f0-9]{40}$ ]]
           test "$GITHUB_SHA" = "$EXPECTED_SOURCE_SHA"
           test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+      - name: Verify native enable source boundary
+        if: inputs.operation == 'enable'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          from tools.thn_test_release import PROVISIONED_SOURCE_SHA, verify_enable_source_delta
+          subprocess.run(['git', 'merge-base', '--is-ancestor', PROVISIONED_SOURCE_SHA, 'HEAD'], check=True)
+          changed = subprocess.check_output(['git', 'diff', '--name-only', '-z', PROVISIONED_SOURCE_SHA, 'HEAD'])
+          verify_enable_source_delta([path.decode('utf-8') for path in changed.split(b'\0') if path])
+          PY
       - uses: aws-actions/setup-sam@89ddb14d60e682855e3fea4be85b3c56485de310 # v3
         with:
           version: 1.163.0
