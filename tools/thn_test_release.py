@@ -55,6 +55,7 @@ ENABLE_SOURCE_DELTA_FILES = frozenset({
     "tests_release/test_thn_image_native_recovery.py",
     "tests_release/test_thn_image_recovery.py",
     "tests_release/test_thn_image_alias_patch.py",
+    "tests_release/test_thn_release_guards.py",
     "tests_release/test_thn_test_release.py",
     "tools/thn_image_recovery.py",
     "tools/thn_image_alias_patch.py",
