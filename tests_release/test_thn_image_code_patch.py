@@ -1,6 +1,7 @@
 """Exact native TEST image code-patch boundary."""
 
 import base64
+from contextlib import redirect_stderr
 from copy import deepcopy
 import hashlib
 import io
@@ -8,6 +9,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+import sys
 from unittest.mock import patch
 from types import SimpleNamespace
 
@@ -252,6 +254,36 @@ class CodePatchTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 with self.assertRaises(subject.ReleaseBlocked):
                     subject.review_code_changes(invalid, OLD, new_id)
+
+    def test_rejected_change_set_exposes_only_safe_shape_for_diagnosis(self):
+        unexpected = change("SharedRole", "AWS::IAM::Role", "Modify",
+                            Replacement="Conditional", BeforeValue="do-not-log",
+                            Scope=["Properties"], Details=[{
+                                "Target": {"Attribute": "Properties", "Name": "Policies",
+                                           "BeforeValue": "do-not-log"},
+                                "ChangeSource": "ResourceReference",
+                                "CausingEntity": "do-not-log"}])
+        with self.assertRaises(subject.ReleaseBlocked) as caught:
+            subject.review_code_changes([unexpected], OLD, FUNCTION + "Version0123456789")
+        self.assertEqual(str(caught.exception), "code_patch_change_set_not_exact")
+        self.assertEqual(caught.exception.change_inventory[0], {
+            "logical_id": "SharedRole", "resource_type": "AWS::IAM::Role",
+            "action": "Modify", "replacement": "Conditional", "policy_action": None,
+            "scope": ["Properties"], "details": [{"attribute": "Properties",
+                "name": "Policies", "change_source": "ResourceReference"}]})
+        self.assertNotIn("do-not-log", json.dumps(caught.exception.change_inventory))
+
+    def test_cli_reports_rejected_change_shape_without_aws_values(self):
+        error = subject.ReleaseBlocked("code_patch_change_set_not_exact")
+        error.change_inventory = [{"logical_id": "SharedRole", "action": "Modify"}]
+        output = io.StringIO()
+        with patch.object(subject, "run", side_effect=error), \
+                patch.object(sys, "argv", ["thn_image_code_patch.py", "--execution", "review"]), \
+                redirect_stderr(output):
+            self.assertEqual(subject.main(), 1)
+        self.assertEqual(json.loads(output.getvalue()), {
+            "error": "code_patch_change_set_not_exact",
+            "change_inventory": [{"logical_id": "SharedRole", "action": "Modify"}]})
 
     def test_deployed_native_shape_reconstructs_sealed_baseline(self):
         prepatch = native()

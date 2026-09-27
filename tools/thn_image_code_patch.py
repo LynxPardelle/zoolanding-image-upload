@@ -159,7 +159,46 @@ def build_code_patch(template: Any, code: Any, code_sha256: str) -> tuple[dict, 
     return candidate, old_id, new_id
 
 
+def _safe_change_inventory(changes: Any) -> list[dict]:
+    """Report only change-set shape; never property values or physical IDs."""
+    def safe(value: Any, pattern: str) -> str | None:
+        if value is None:
+            return None
+        return value if isinstance(value, str) and re.fullmatch(pattern, value) else "invalid"
+
+    inventory = []
+    for item in changes[:20] if isinstance(changes, list) else []:
+        resource = item.get("ResourceChange") if isinstance(item, dict) else None
+        resource = resource if isinstance(resource, dict) else {}
+        details = resource.get("Details")
+        inventory.append({
+            "logical_id": safe(resource.get("LogicalResourceId"), r"[A-Za-z0-9]{1,255}"),
+            "resource_type": safe(resource.get("ResourceType"), r"AWS::[A-Za-z0-9:]{1,128}"),
+            "action": safe(resource.get("Action"), r"Add|Modify|Remove|Import|Dynamic"),
+            "replacement": safe(resource.get("Replacement"), r"True|False|Conditional"),
+            "policy_action": safe(resource.get("PolicyAction"), r"Retain|Delete|Snapshot"),
+            "scope": [safe(value, r"[A-Za-z]{1,32}") for value in resource["Scope"]]
+                if isinstance(resource.get("Scope"), list) else None,
+            "details": [{
+                "attribute": safe(detail.get("Target", {}).get("Attribute"), r"[A-Za-z]{1,32}"),
+                "name": safe(detail.get("Target", {}).get("Name"), r"[A-Za-z0-9]{1,128}"),
+                "change_source": safe(detail.get("ChangeSource"), r"[A-Za-z]{1,64}"),
+            } for detail in details[:20] if isinstance(detail, dict)
+                and isinstance(detail.get("Target"), dict)] if isinstance(details, list) else None,
+        })
+    return inventory
+
+
 def review_code_changes(changes: Any, old_id: str, new_id: str) -> None:
+    try:
+        _review_code_changes_strict(changes, old_id, new_id)
+    except ReleaseBlocked as error:
+        if str(error) == "code_patch_change_set_not_exact":
+            error.change_inventory = _safe_change_inventory(changes)
+        raise
+
+
+def _review_code_changes_strict(changes: Any, old_id: str, new_id: str) -> None:
     """Reject any change-set effect outside the exact four-resource contract."""
     if not isinstance(changes, list) or len(changes) != 4 or old_id == new_id:
         raise ReleaseBlocked("code_patch_change_set_not_exact")
@@ -542,7 +581,11 @@ def main() -> int:
         import boto3
         result = run(boto3.Session(region_name=release.REGION), dict(os.environ), args.execution)
     except ReleaseBlocked as error:
-        print(str(error), file=sys.stderr)
+        if hasattr(error, "change_inventory"):
+            print(json.dumps({"error": str(error),
+                "change_inventory": error.change_inventory}, sort_keys=True), file=sys.stderr)
+        else:
+            print(str(error), file=sys.stderr)
         return 1
     except Exception:
         print("thn_image_code_patch_failed", file=sys.stderr)
