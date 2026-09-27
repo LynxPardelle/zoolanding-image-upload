@@ -49,16 +49,22 @@ ENABLE_SOURCE_DELTA_FILES = frozenset({
     "changelog/README.md",
     "docs/thn-test-release.md",
     "docs/superpowers/specs/2026-09-26-thn-image-test-alias-repair-design.md",
+    "docs/superpowers/specs/2026-09-26-thn-test-image-code-patch-design.md",
     "plan/infrastructure-thn-image-alias-repair-1.md",
+    "plan/infrastructure-thn-image-code-patch-1.md",
+    "private_upload_v2.py",
+    "tests/test_private_upload_v2.py",
     "tests_release/test_release_artifact.py",
     "tests_release/test_test_validation_boundary.py",
     "tests_release/test_thn_image_native_recovery.py",
     "tests_release/test_thn_image_recovery.py",
     "tests_release/test_thn_image_alias_patch.py",
+    "tests_release/test_thn_image_code_patch.py",
     "tests_release/test_thn_release_guards.py",
     "tests_release/test_thn_test_release.py",
     "tools/thn_image_recovery.py",
     "tools/thn_image_alias_patch.py",
+    "tools/thn_image_code_patch.py",
     "tools/thn_test_release.py",
 })
 DISPATCH_OPERATIONS = OPERATIONS | {"resume-create"}
@@ -222,7 +228,21 @@ def recovered_native_enable_template(original: dict, processed: dict, enabled: s
             verify_patched_native(original, processed, APPROVED_BASELINE["versionLogicalId"],
                                   APPROVED_BASELINE["processedSha256"])
         except ReleaseBlocked:
-            raise ReleaseBlocked("recovered_native_enable_baseline_mismatch") from None
+            from tools.thn_image_code_patch import (PREPATCH_CODE, PREPATCH_VERSION_ID,
+                PREPATCH_CODE_SHA, verify_code_patched_native, verify_released_code_coordinate)
+            try:
+                versions = [value for value in original.get("Resources", {}).values()
+                            if isinstance(value, dict) and value.get("Type") == "AWS::Lambda::Version"]
+                if len(versions) != 1:
+                    raise ReleaseBlocked("recovered_native_enable_baseline_mismatch")
+                code_sha = versions[0]["Properties"]["CodeSha256"]
+                verify_code_patched_native(original, processed, PREPATCH_CODE,
+                    PREPATCH_VERSION_ID, PREPATCH_CODE_SHA,
+                    APPROVED_BASELINE["versionLogicalId"],
+                    APPROVED_BASELINE["processedSha256"], code_sha)
+                verify_released_code_coordinate(original, code_sha)
+            except (KeyError, TypeError, ReleaseBlocked):
+                raise ReleaseBlocked("recovered_native_enable_baseline_mismatch") from None
     verify_private_processed(original)
     return deepcopy(original)
 
