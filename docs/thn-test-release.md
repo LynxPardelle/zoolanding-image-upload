@@ -36,6 +36,17 @@ source-validation pipeline.
 | `enable` | Add the single alias-qualified Hub-authoring invoke permission; concurrency two | Matching active registry descriptor/scope/bindings, writers disabled, enabled protected Auth, real Hub authoring role |
 | `disable` | Remove that exact entry permission and set concurrency zero | Ledger already closed and epoch advanced; keep state, function, role, alias and retained versions |
 | `alias-patch` | Publish the already configured private function as one new version and move its existing `test` alias | Exact sealed native TEST baseline, active QA-only binding, same code and role; review accepts only retained old Version removal, new Version addition and non-replacing Alias modification |
+| `code-patch` | Replace only private Function Code, publish one retained Version and move its existing `test` alias | Exact deployed alias-patched native TEST template and artifact coordinates; review accepts only Function Code Modify, old Version Remove/Retain, new Version Add and Alias FunctionVersion Modify |
+
+## TEST image code finalization patch
+
+The private image processor originally passed already serialized DynamoDB transaction items through a resource client, which serialized them again. The tested source fix uses the low-level DynamoDB client. Source promotion alone does not replace the code behind the `test` alias.
+
+Use `Deploy THN Test` at the exact reviewed `test` SHA with `operation=code-patch` and `code_patch_execution=review`. This packages only the validated private SAM artifact, verifies its digest after upload, and creates a CloudFormation UPDATE change set without executing it. It pins the currently deployed native alias patch, Lambda code hash, retained state, registry and QA-only writer mode. Any state drift or extra change-set entry blocks release; inspect the reported change set rather than retrying a general deployment.
+
+After reviewing the safe four-effect result, dispatch the same source SHA with `code_patch_execution=execute`. This run rebuilds and verifies its own artifact and fresh change set, repeats the complete live preflight immediately before execution, and requires Function Code Modify without replacement, old Version Remove with Retain, new Version Add, and Alias FunctionVersion Modify without replacement. It does not update role, environment, concurrency, transaction state, permissions, registry, public v1 resources, or any shared resource. Two postchecks require the new alias and code hash, old physical Version, unchanged parameters and protected inventory, and unchanged registry/writer mode. If any check fails, stop for diagnosis; rollback needs a separately reviewed change set.
+
+`code_patch_execution=verify` reads the currently deployed state twice without a change set. It requires the same reviewed source SHA and private artifact hash, confirms the S3 release object, and checks the native template and live Lambda alias. The earlier failed upload transaction may have expired; use a new synthetic QA cover upload and confirm the new transaction commits and the draft retains the cover. Do not publish the client's content as part of this patch.
 
 ## TEST image alias configuration repair
 
