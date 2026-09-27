@@ -255,6 +255,34 @@ class CodePatchTests(unittest.TestCase):
                 with self.assertRaises(subject.ReleaseBlocked):
                     subject.review_code_changes(invalid, OLD, new_id)
 
+    def test_alias_version_attribute_detail_is_tied_to_new_managed_version(self):
+        new_id = FUNCTION + "Version0123456789"
+        direct = {"Target": {"Attribute": "Properties", "Name": "FunctionVersion"},
+                  "ChangeSource": "DirectModification"}
+        derived = {"Target": {"Attribute": "Properties", "Name": "FunctionVersion"},
+                   "ChangeSource": "ResourceAttribute", "CausingEntity": new_id + ".Version"}
+        allowed = [
+            change(FUNCTION, "AWS::Lambda::Function", "Modify", Replacement="False",
+                   Scope=["Properties"], Details=[{"Target": {"Attribute": "Properties", "Name": "Code"},
+                                                   "ChangeSource": "DirectModification"}]),
+            change(OLD, "AWS::Lambda::Version", "Remove", PolicyAction="Retain"),
+            change(new_id, "AWS::Lambda::Version", "Add"),
+            change(ALIAS, "AWS::Lambda::Alias", "Modify", Replacement="False",
+                   Scope=["Properties"], Details=[derived, direct]),
+        ]
+        subject.review_code_changes(allowed, OLD, new_id)
+        for mutation in (
+            lambda details: details[0].update(CausingEntity=OLD + ".Version"),
+            lambda details: details[0]["Target"].update(Name="FunctionName"),
+            lambda details: details[0].update(ChangeSource="ParameterReference"),
+            lambda details: details.append(deepcopy(derived)),
+        ):
+            invalid = deepcopy(allowed)
+            mutation(invalid[-1]["ResourceChange"]["Details"])
+            with self.subTest(invalid=invalid):
+                with self.assertRaises(subject.ReleaseBlocked):
+                    subject.review_code_changes(invalid, OLD, new_id)
+
     def test_rejected_change_set_exposes_only_safe_shape_for_diagnosis(self):
         unexpected = change("SharedRole", "AWS::IAM::Role", "Modify",
                             Replacement="Conditional", BeforeValue="do-not-log",
@@ -270,7 +298,8 @@ class CodePatchTests(unittest.TestCase):
             "logical_id": "SharedRole", "resource_type": "AWS::IAM::Role",
             "action": "Modify", "replacement": "Conditional", "policy_action": None,
             "scope": ["Properties"], "details": [{"attribute": "Properties",
-                "name": "Policies", "change_source": "ResourceReference"}]})
+                "name": "Policies", "change_source": "ResourceReference",
+                "causing_entity": "invalid"}]})
         self.assertNotIn("do-not-log", json.dumps(caught.exception.change_inventory))
 
     def test_cli_reports_rejected_change_shape_without_aws_values(self):
