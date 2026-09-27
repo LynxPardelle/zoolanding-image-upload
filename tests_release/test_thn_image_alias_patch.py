@@ -158,6 +158,13 @@ class AliasPatchTests(unittest.TestCase):
         with patch.object(release, "verify_processed"):
             subject._review(description, change_id, "thn-alias-123-1", baseline,
                             candidate, old_id, new_id, inputs, cfn)
+        changed = deepcopy(candidate)
+        changed["Description"] = "private-value-must-not-leak"
+        cfn = SimpleNamespace(get_template=lambda **kwargs: {"TemplateBody": deepcopy(changed)})
+        with self.assertRaises(subject.ReleaseBlocked) as error:
+            subject._review(description, change_id, "thn-alias-123-1", baseline,
+                            candidate, old_id, new_id, inputs, cfn)
+        self.assertEqual(str(error.exception), "alias_change_set_original_mismatch:Description")
 
     def test_native_seal_and_patched_lifecycle_shape_reject_unrelated_drift(self):
         baseline = native()
