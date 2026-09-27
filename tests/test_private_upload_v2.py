@@ -10,6 +10,7 @@ from decimal import Decimal
 from types import SimpleNamespace
 from unittest import mock
 
+import boto3
 from PIL import Image
 
 PRIVATE_MODULE_AVAILABLE = importlib.util.find_spec("private_upload_v2") is not None
@@ -510,6 +511,7 @@ class PrivateUploadV2AwsRuntimeTests(unittest.TestCase):
         self.runtime = object.__new__(target.AwsPrivateUploadV2Runtime)
         self.runtime.transaction_table = self.transaction_table
         self.runtime.registry_table = self.registry_table
+        self.runtime.ddb_client = self.client
         self.runtime.bucket_name = "private-bucket"
         self.runtime.s3 = SimpleNamespace(put_object=lambda **kwargs: None)
 
@@ -596,6 +598,46 @@ class PrivateUploadV2AwsRuntimeTests(unittest.TestCase):
             "REMOVE claimId, claimExpiresAtEpoch",
             transaction_update["UpdateExpression"],
         )
+
+    def test_final_commit_sends_single_serialized_keys_to_dynamodb(self):
+        class CapturedRequest(Exception):
+            def __init__(self, body):
+                self.body = body
+
+        resource = boto3.resource(
+            "dynamodb", region_name="us-east-1",
+            aws_access_key_id="test", aws_secret_access_key="test",
+        )
+        client = boto3.client(
+            "dynamodb", region_name="us-east-1",
+            aws_access_key_id="test", aws_secret_access_key="test",
+        )
+
+        def capture_request(model, params, **kwargs):
+            raise CapturedRequest(json.loads(params["body"]))
+
+        resource.meta.client.meta.events.register(
+            "before-call.dynamodb.TransactWriteItems", capture_request
+        )
+        client.meta.events.register(
+            "before-call.dynamodb.TransactWriteItems", capture_request
+        )
+        self.runtime.transaction_table = resource.Table("transactions")
+        self.runtime.ddb_client = client
+        result = pipeline.process_image(self.source, "image/png")
+        claimed = dict(
+            self.transaction, status="processing", attemptCount=1, claimId="claim-1"
+        )
+
+        with self.assertRaises(CapturedRequest) as captured:
+            self.runtime.finalize_transaction(
+                claimed, self.registry, "claim-1", result, NOW,
+                {variant.variant_id: "fixture-version" for variant in result.variants},
+            )
+
+        items = captured.exception.body["TransactItems"]
+        self.assertEqual(items[0]["ConditionCheck"]["Key"]["pk"], {"S": self.registry["pk"]})
+        self.assertEqual(items[1]["Update"]["Key"]["pk"], {"S": self.transaction["pk"]})
 
     def test_private_object_write_has_no_public_acl(self):
         calls = []
