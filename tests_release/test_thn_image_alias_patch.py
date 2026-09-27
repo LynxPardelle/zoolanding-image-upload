@@ -67,6 +67,83 @@ def change(logical, kind, action, **fields):
 
 
 class AliasPatchTests(unittest.TestCase):
+    def test_post_publish_revision_change_preserves_configuration_fence(self):
+        before = latest()
+        after = deepcopy(before)
+        after["RevisionId"] = "published-revision"
+        published = deepcopy(after)
+        published["Version"] = "2"
+        subject.verify_post_configuration(
+            after, stale(), published,
+            {"latest": subject._function_snapshot(before),
+             "published": subject._function_snapshot(stale())}, "2")
+        after["Environment"]["Variables"]["LOG_LEVEL"] = "DEBUG"
+        with self.assertRaises(subject.ReleaseBlocked):
+            subject.verify_post_configuration(
+                after, stale(), published,
+                {"latest": subject._function_snapshot(before),
+                 "published": subject._function_snapshot(stale())}, "2")
+
+    def test_verify_mode_reads_patched_state_without_creating_change_set(self):
+        class CloudFormation:
+            def create_change_set(self, **kwargs):
+                raise AssertionError("verify must not create a change set")
+
+        cfn = CloudFormation()
+        session = SimpleNamespace(client=lambda name, **kwargs: {
+            "sts": SimpleNamespace(get_caller_identity=lambda: {"Account": "123456789012"}),
+            "cloudformation": cfn,
+        }[name])
+        env = {"ARTIFACTS_BUCKET": "test-artifacts", "GITHUB_RUN_ID": "123",
+               "GITHUB_RUN_ATTEMPT": "1", "GITHUB_SHA": "a" * 40}
+        with patch.object(release, "validate_context"), patch.object(release, "validate_deploy_identity"), \
+                patch.object(subject, "verify_current_patch", return_value={"alias_version": "2"}) as verified, \
+                patch.object(subject.time, "sleep"):
+            self.assertEqual(subject.run(session, env, "verify")["decision"], "verified-no-execution")
+            self.assertEqual(verified.call_count, 2)
+
+    def test_verify_current_patch_requires_managed_alias_and_published_parity(self):
+        base = native()
+        candidate, old_id, new_id = subject.build_native_patch(base, latest(), PARAMETERS)
+        account = "123456789012"
+        function_arn = f"arn:aws:lambda:us-east-1:{account}:function:{release.FUNCTION_NAME}"
+        inventory = {key: {"PhysicalResourceId": key, "ResourceType": value["Type"]}
+                     for key, value in candidate["Resources"].items()}
+        inventory[new_id]["PhysicalResourceId"] = function_arn + ":2"
+        alias = {"AliasArn": function_arn + ":test", "FunctionVersion": "2"}
+        published = deepcopy(latest())
+        published["Version"] = "2"
+        configurations = {None: latest(), "1": stale(), "2": published}
+        client = SimpleNamespace(
+            get_alias=lambda **kwargs: alias,
+            get_function_configuration=lambda **kwargs: configurations[kwargs.get("Qualifier")])
+        session = SimpleNamespace(client=lambda name, **kwargs: {"lambda": client}[name])
+        stack = {"StackStatus": "UPDATE_COMPLETE",
+                 "Parameters": [{"ParameterKey": key, "ParameterValue": value}
+                                for key, value in PARAMETERS.items()] +
+                               [{"ParameterKey": release.GATE,
+                                 "ParameterValue": "CONFIRMED_ENABLED"}]}
+        cfn = SimpleNamespace(
+            describe_stacks=lambda **kwargs: {"Stacks": [stack]},
+            get_template=lambda **kwargs: {"TemplateBody": deepcopy(candidate)})
+        digest = subject._digest(base)
+        with patch.dict(recovery.APPROVED_BASELINE,
+                        {"processedSha256": digest, "versionLogicalId": old_id}), \
+                patch.object(release, "validate_stack"), patch.object(release, "cloudformation_role"), \
+                patch.object(release, "verify_private_processed"), \
+                patch.object(release, "_inventory", return_value=inventory), \
+                patch.object(release, "_verify_retained_state"), \
+                patch.object(release, "verify_runtime"), \
+                patch.object(release, "verify_dependencies", return_value="binding"):
+            self.assertEqual(subject.verify_current_patch(session, cfn, account)["alias_version"], "2")
+            alias["FunctionVersion"] = "1"
+            with self.assertRaises(subject.ReleaseBlocked):
+                subject.verify_current_patch(session, cfn, account)
+            alias["FunctionVersion"] = "2"
+            published["Environment"]["Variables"]["LOG_LEVEL"] = "DEBUG"
+            with self.assertRaises(subject.ReleaseBlocked):
+                subject.verify_current_patch(session, cfn, account)
+
     def test_review_never_executes_and_execute_rechecks_before_mutation(self):
         base = native()
         base["Parameters"] = {key: {"Type": "String"} for key in PARAMETERS}

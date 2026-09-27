@@ -240,6 +240,25 @@ def _function_snapshot(configuration: dict) -> dict:
         "Timeout", "EphemeralStorage", "Architectures", "Environment", "State", "LastUpdateStatus")}
 
 
+def verify_post_configuration(latest: dict, old: dict, published: dict,
+                              before: dict, new_version: str) -> None:
+    """Allow Lambda's publication revision while fencing every runtime value."""
+    current = _function_snapshot(latest)
+    previous = before.get("latest", {})
+    if (not isinstance(latest.get("RevisionId"), str) or not latest["RevisionId"]
+            or {key: value for key, value in current.items() if key != "RevisionId"}
+            != {key: value for key, value in previous.items() if key != "RevisionId"}
+            or _function_snapshot(old) != before.get("published")
+            or published.get("Version") != new_version
+            or published.get("State") != "Active"
+            or published.get("LastUpdateStatus") != "Successful"
+            or published.get("CodeSha256") != latest.get("CodeSha256")
+            or _variables(published) != _variables(latest)
+            or any(published.get(key) != latest.get(key) for key in
+                   ("Role", "Runtime", "Handler", "MemorySize", "Timeout", "EphemeralStorage", "Architectures"))):
+        raise ReleaseBlocked("alias_post_configuration_mismatch")
+
+
 def inspect(session: Any, cfn: Any, account: str) -> dict:
     """Read a full independent preflight; no AWS writes occur here."""
     from tools.thn_image_recovery import APPROVED_BASELINE
@@ -380,18 +399,65 @@ def _postcheck(session: Any, cfn: Any, account: str, baseline: dict,
     published = client.get_function_configuration(FunctionName=baseline["function_arn"], Qualifier=new_version)
     old = client.get_function_configuration(FunctionName=baseline["function_arn"],
         Qualifier=baseline["old_version"])
-    if (_function_snapshot(latest) != baseline["snapshot"]["latest"]
-            or _function_snapshot(old) != baseline["snapshot"]["published"]
-            or published.get("Version") != new_version
-            or published.get("CodeSha256") != latest.get("CodeSha256")
-            or _variables(published) != _variables(latest)
-            or any(published.get(key) != latest.get(key) for key in
-                   ("Role", "Runtime", "Handler", "MemorySize", "Timeout", "EphemeralStorage", "Architectures"))):
-        raise ReleaseBlocked("alias_post_configuration_mismatch")
+    verify_post_configuration(latest, old, published, baseline["snapshot"], new_version)
+
+
+def verify_current_patch(session: Any, cfn: Any, account: str) -> dict:
+    """Read the deployed native patch independently, without a change set."""
+    from tools.thn_image_recovery import APPROVED_BASELINE
+
+    stacks = cfn.describe_stacks(StackName=release.STACK)["Stacks"]
+    if len(stacks) != 1:
+        raise ReleaseBlocked("alias_verify_stack_invalid")
+    stack = stacks[0]
+    release.validate_stack(stack, account)
+    release.cloudformation_role(account, stack)
+    if stack.get("StackStatus") != "UPDATE_COMPLETE":
+        raise ReleaseBlocked("alias_verify_stack_invalid")
+    parameters = release._parameters(stack)
+    if (parameters.get(release.ENABLE) != "true" or parameters.get(release.STATE) != "true"
+            or parameters.get(release.GATE) != "CONFIRMED_ENABLED"):
+        raise ReleaseBlocked("alias_verify_runtime_not_enabled")
+    original = release._load_template(cfn.get_template(StackName=release.STACK,
+        TemplateStage="Original")["TemplateBody"])
+    processed = release._load_template(cfn.get_template(StackName=release.STACK,
+        TemplateStage="Processed")["TemplateBody"])
+    verify_patched_native(original, processed, APPROVED_BASELINE["versionLogicalId"],
+                          APPROVED_BASELINE["processedSha256"])
+    release.verify_private_processed(original)
+    inventory = release._inventory(cfn)
+    if set(inventory) != set(original["Resources"]):
+        raise ReleaseBlocked("alias_verify_inventory_invalid")
+    for logical, resource in original["Resources"].items():
+        if inventory[logical]["ResourceType"] != resource["Type"]:
+            raise ReleaseBlocked("alias_verify_inventory_invalid")
+    release._verify_retained_state(session, inventory, original, account)
+    release.verify_runtime(session, inventory, True, account)
+    registry_sha = release.verify_dependencies(session, "alias-patch", parameters, account)
+    function_arn = f"arn:aws:lambda:{release.REGION}:{account}:function:{release.FUNCTION_NAME}"
+    client = session.client("lambda", region_name=release.REGION)
+    alias = client.get_alias(FunctionName=function_arn, Name="test")
+    version = str(alias.get("FunctionVersion", ""))
+    managed = _version_ids(original)[0]
+    if (alias.get("AliasArn") != function_arn + ":test"
+            or alias.get("RoutingConfig", {}).get("AdditionalVersionWeights")
+            or not re.fullmatch(r"[1-9][0-9]*", version)
+            or inventory[managed]["PhysicalResourceId"] != function_arn + ":" + version):
+        raise ReleaseBlocked("alias_verify_target_invalid")
+    latest = client.get_function_configuration(FunctionName=function_arn)
+    published = client.get_function_configuration(FunctionName=function_arn, Qualifier=version)
+    old = client.get_function_configuration(FunctionName=function_arn, Qualifier="1")
+    verify_configuration(latest, old, parameters)
+    verify_alias_parity(latest, published, parameters)
+    return {"alias_version": version, "template_sha256": _digest(original),
+            "registry_sha256": registry_sha,
+            "inventory_sha256": _digest(inventory),
+            "latest_sha256": _digest(_function_snapshot(latest)),
+            "published_sha256": _digest(_function_snapshot(published))}
 
 
 def run(session: Any, env: dict, execution: str) -> dict:
-    if execution not in {"review", "execute"}:
+    if execution not in {"review", "execute", "verify"}:
         raise ReleaseBlocked("alias_execution_invalid")
     release.validate_context(env)
     bucket = env.get("ARTIFACTS_BUCKET", "")
@@ -401,6 +467,14 @@ def run(session: Any, env: dict, execution: str) -> dict:
     release.validate_deploy_identity(identity)
     account = identity["Account"]
     cfn = session.client("cloudformation", region_name=release.REGION)
+    if execution == "verify":
+        first = verify_current_patch(session, cfn, account)
+        time.sleep(5)
+        second = verify_current_patch(session, cfn, account)
+        if first != second:
+            raise ReleaseBlocked("alias_verify_changed_between_reads")
+        return {"operation": "alias-patch", "decision": "verified-no-execution",
+                "source_sha": env["GITHUB_SHA"], **second}
     baseline = inspect(session, cfn, account)
     candidate, old_id, new_id = build_native_patch(baseline["original"],
         baseline["latest"], baseline["parameters"])
@@ -467,7 +541,7 @@ def run(session: Any, env: dict, execution: str) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--execution", choices=("review", "execute"), required=True)
+    parser.add_argument("--execution", choices=("review", "execute", "verify"), required=True)
     args = parser.parse_args()
     try:
         import boto3

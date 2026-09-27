@@ -17,10 +17,10 @@ on:
         options: [verify, execute]
         default: verify
       alias_patch_execution:
-        description: For alias-patch only, inspect without execution or apply the exact reviewed three-resource change
+        description: For alias-patch only, review a change set, execute it, or verify the deployed result read-only
         required: true
         type: choice
-        options: [review, execute]
+        options: [review, execute, verify]
         default: review
       expected_source_sha:
         description: Reviewed full commit SHA already promoted to TEST
@@ -210,7 +210,7 @@ jobs:
               from tools.thn_image_recovery import APPROVED_BASELINE
               raise SystemExit(0)
           if os.environ['THN_OPERATION'] == 'alias-patch':
-              if os.environ.get('THN_ALIAS_PATCH_EXECUTION') not in {'review', 'execute'}:
+              if os.environ.get('THN_ALIAS_PATCH_EXECUTION') not in {'review', 'execute', 'verify'}:
                   raise SystemExit('alias_patch_execution_required')
               from tools.thn_image_alias_patch import review_exact_changes
               raise SystemExit(0)
