@@ -183,6 +183,7 @@ def _safe_change_inventory(changes: Any) -> list[dict]:
                 "attribute": safe(detail.get("Target", {}).get("Attribute"), r"[A-Za-z]{1,32}"),
                 "name": safe(detail.get("Target", {}).get("Name"), r"[A-Za-z0-9]{1,128}"),
                 "change_source": safe(detail.get("ChangeSource"), r"[A-Za-z]{1,64}"),
+                "causing_entity": safe(detail.get("CausingEntity"), r"[A-Za-z0-9]{1,255}\.Version"),
             } for detail in details[:20] if isinstance(detail, dict)
                 and isinstance(detail.get("Target"), dict)] if isinstance(details, list) else None,
         })
@@ -224,12 +225,20 @@ def _review_code_changes_strict(changes: Any, old_id: str, new_id: str) -> None:
         if property_name:
             details = resource.get("Details")
             if (resource.get("Replacement") != "False" or resource.get("Scope") != ["Properties"]
-                    or not isinstance(details, list) or len(details) != 1
-                    or not isinstance(details[0], dict)
-                    or not isinstance(details[0].get("Target"), dict)
-                    or details[0].get("Target", {}).get("Attribute") != "Properties"
-                    or details[0]["Target"].get("Name") != property_name
-                    or details[0].get("ChangeSource") != "DirectModification"):
+                    or not isinstance(details, list)):
+                raise ReleaseBlocked("code_patch_change_set_not_exact")
+            def targets_property(detail: Any) -> bool:
+                return (isinstance(detail, dict) and isinstance(detail.get("Target"), dict)
+                        and detail["Target"].get("Attribute") == "Properties"
+                        and detail["Target"].get("Name") == property_name)
+            direct = [detail for detail in details if targets_property(detail)
+                      and detail.get("ChangeSource") == "DirectModification"]
+            derived = [detail for detail in details if targets_property(detail)
+                       and detail.get("ChangeSource") == "ResourceAttribute"
+                       and detail.get("CausingEntity") == new_id + ".Version"]
+            if not (len(details) == 1 and len(direct) == 1
+                    or logical == ALIAS and len(details) == 2
+                    and len(direct) == 1 and len(derived) == 1):
                 raise ReleaseBlocked("code_patch_change_set_not_exact")
         elif resource.get("Scope") not in (None, []) or resource.get("Details") not in (None, []):
             raise ReleaseBlocked("code_patch_change_set_not_exact")
