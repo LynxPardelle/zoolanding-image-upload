@@ -15,6 +15,8 @@ import time
 from decimal import Decimal
 from typing import Any
 
+import boto3
+
 from private_upload_v2_pipeline import (
     ALLOWED_CONTENT_TYPES,
     PrivateImageValidationError,
@@ -450,6 +452,8 @@ class AwsPrivateUploadV2Runtime:
             )
         self.transaction_table = get_table(transaction_table_name)
         self.registry_table = get_table(registry_table_name)
+        # Finalize sends AttributeValue maps; a Table resource client would serialize them again.
+        self.ddb_client = boto3.client("dynamodb")
         self.bucket_name = bucket_name
         self.s3 = get_s3_client()
 
@@ -651,8 +655,7 @@ class AwsPrivateUploadV2Runtime:
                 f"#{field} = :expected_{field}" for field in transaction_fence_fields
             )
         )
-        client = self.transaction_table.meta.client
-        client.transact_write_items(
+        self.ddb_client.transact_write_items(
             TransactItems=[
                 {
                     "ConditionCheck": {

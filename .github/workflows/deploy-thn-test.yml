@@ -6,10 +6,10 @@ on:
   workflow_dispatch:
     inputs:
       operation:
-        description: Private-only protected lifecycle or exact TEST alias patch
+        description: Private-only protected lifecycle or exact TEST patch
         required: true
         type: choice
-        options: [create, provision, enable, disable, resume-create, alias-patch]
+        options: [create, provision, enable, disable, resume-create, alias-patch, code-patch]
       recovery_execution:
         description: For resume-create only, review without execution or execute the exact retained recovery
         required: true
@@ -18,6 +18,12 @@ on:
         default: verify
       alias_patch_execution:
         description: For alias-patch only, review a change set, execute it, or verify the deployed result read-only
+        required: true
+        type: choice
+        options: [review, execute, verify]
+        default: review
+      code_patch_execution:
+        description: For code-patch only, review a change set, execute it, or verify the deployed result read-only
         required: true
         type: choice
         options: [review, execute, verify]
@@ -109,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .aws-sam/build/release-tools/tools
-          cp tools/__init__.py tools/thn_test_release.py tools/thn_image_alias_patch.py tools/thn_image_recovery.py tools/prepare_test_parameters.py tools/review_test_change_set.py .aws-sam/build/release-tools/tools/
+          cp tools/__init__.py tools/thn_test_release.py tools/thn_image_alias_patch.py tools/thn_image_code_patch.py tools/thn_image_recovery.py tools/prepare_test_parameters.py tools/review_test_change_set.py .aws-sam/build/release-tools/tools/
           cp requirements-release.txt .aws-sam/build/release-tools/
           python - <<'PY'
           import json, os
@@ -196,6 +202,7 @@ jobs:
           THN_OPERATION: ${{ inputs.operation }}
           THN_RECOVERY_EXECUTION: ${{ inputs.recovery_execution }}
           THN_ALIAS_PATCH_EXECUTION: ${{ inputs.alias_patch_execution }}
+          THN_CODE_PATCH_EXECUTION: ${{ inputs.code_patch_execution }}
           AWS_ROLE_ARN: ${{ vars.AWS_ROLE_ARN }}
           THN_V2_TEST_PARAMETERS_JSON: ${{ vars.THN_V2_TEST_PARAMETERS_JSON }}
         run: |
@@ -214,6 +221,11 @@ jobs:
                   raise SystemExit('alias_patch_execution_required')
               from tools.thn_image_alias_patch import review_exact_changes
               raise SystemExit(0)
+          if os.environ['THN_OPERATION'] == 'code-patch':
+              if os.environ.get('THN_CODE_PATCH_EXECUTION') not in {'review', 'execute', 'verify'}:
+                  raise SystemExit('code_patch_execution_required')
+              from tools.thn_image_code_patch import review_code_changes
+              raise SystemExit(0)
           lifecycle_parameters({'StackId': 'arn:aws:cloudformation:us-east-1:' + os.environ['AWS_ROLE_ARN'].split(':')[4] + ':stack/zoolanding-image-upload-test/preflight', 'Parameters': [
             {'ParameterKey': 'ProvisionThnPrivateUploadV2State', 'ParameterValue': 'true'},
             {'ParameterKey': 'EnableThnPrivateUploadV2', 'ParameterValue': 'false'}]},
@@ -228,11 +240,14 @@ jobs:
           THN_OPERATION: ${{ inputs.operation }}
           THN_RECOVERY_EXECUTION: ${{ inputs.recovery_execution }}
           THN_ALIAS_PATCH_EXECUTION: ${{ inputs.alias_patch_execution }}
+          THN_CODE_PATCH_EXECUTION: ${{ inputs.code_patch_execution }}
           THN_V2_TEST_PARAMETERS_JSON: ${{ vars.THN_V2_TEST_PARAMETERS_JSON }}
           ARTIFACTS_BUCKET: ${{ vars.SAM_ARTIFACTS_BUCKET }}
         run: |
           if [ "$THN_OPERATION" = 'alias-patch' ]; then
             python .aws-sam/build/release-tools/tools/thn_image_alias_patch.py --execution "$THN_ALIAS_PATCH_EXECUTION"
+          elif [ "$THN_OPERATION" = 'code-patch' ]; then
+            python .aws-sam/build/release-tools/tools/thn_image_code_patch.py --execution "$THN_CODE_PATCH_EXECUTION"
           else
             python .aws-sam/build/release-tools/tools/thn_test_release.py --operation "$THN_OPERATION"
           fi
