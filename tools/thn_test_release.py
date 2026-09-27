@@ -343,7 +343,15 @@ def review_change_set(description: dict, arn: str, name: str, parameters: list[d
 
 def _load_template(body: Any) -> dict:
     if isinstance(body, dict):
-        return deepcopy(body)
+        # CloudFormation's SDK returns nested OrderedDict objects. Their equality
+        # is order-sensitive, while template object key order has no meaning.
+        def plain(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {key: plain(item) for key, item in value.items()}
+            if isinstance(value, list):
+                return [plain(item) for item in value]
+            return deepcopy(value)
+        return plain(body)
     import yaml
     try:
         result = yaml.safe_load(body)
