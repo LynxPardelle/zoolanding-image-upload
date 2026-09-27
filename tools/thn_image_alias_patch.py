@@ -326,8 +326,12 @@ def _review(description: dict, change_id: str, name: str, baseline: dict,
         ChangeSetName=change_id, TemplateStage="Original")["TemplateBody"])
     processed = release._load_template(cfn.get_template(StackName=release.STACK,
         ChangeSetName=change_id, TemplateStage="Processed")["TemplateBody"])
-    if original != candidate or processed != candidate:
-        raise ReleaseBlocked("alias_change_set_template_mismatch")
+    if original != candidate:
+        raise ReleaseBlocked("alias_change_set_original_mismatch:"
+                             + release.template_mismatch_location(candidate, original))
+    if processed != candidate:
+        raise ReleaseBlocked("alias_change_set_processed_mismatch:"
+                             + release.template_mismatch_location(candidate, processed))
     release.verify_processed(baseline["processed"], processed)
 
 
