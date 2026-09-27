@@ -238,7 +238,7 @@ class RetainedRecoveryTests(unittest.TestCase):
 
     def test_recovery_workflow_transports_controller_and_defaults_to_verification(self):
         workflow = (ROOT / ".github/workflows/deploy-thn-test.yml").read_text()
-        self.assertIn("options: [create, provision, enable, disable, resume-create]", workflow)
+        self.assertIn("options: [create, provision, enable, disable, resume-create, alias-patch]", workflow)
         self.assertIn("recovery_execution:", workflow)
         self.assertIn("default: verify", workflow)
         self.assertIn("tools/thn_image_recovery.py", workflow)

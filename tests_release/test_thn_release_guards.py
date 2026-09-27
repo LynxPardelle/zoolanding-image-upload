@@ -90,6 +90,16 @@ class ImageReleaseGuardTests(unittest.TestCase):
                 with self.subTest(field=field, operation=operation), self.assertRaises(subject.ReleaseBlocked):
                     subject.verify_dependencies(self.session, operation, self.values, ACCOUNT)
 
+    def test_alias_patch_requires_exact_active_qa_binding_without_changing_it(self):
+        self.session.row["writerMode"] = "qa-only"
+        before = deepcopy(self.session.row)
+        proof = subject.verify_dependencies(self.session, "alias-patch", self.values, ACCOUNT)
+        self.assertRegex(proof, r"^[a-f0-9]{64}$")
+        self.assertEqual(self.session.row, before)
+        self.session.row["writerMode"] = "disabled"
+        with self.assertRaises(subject.ReleaseBlocked):
+            subject.verify_dependencies(self.session, "alias-patch", self.values, ACCOUNT)
+
     def test_enable_refuses_inactive_or_mismatched_auth(self):
         self.assertTrue(hasattr(subject, "verify_dependencies"), "Deployment dependency checks are missing")
         self.session.auth_enabled = "false"

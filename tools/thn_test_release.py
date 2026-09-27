@@ -45,14 +45,20 @@ ENABLE_SOURCE_DELTA_FILES = frozenset({
     "changelog/2026-09-13-native-image-recovery-review.md",
     "changelog/2026-09-13-retained-image-recovery.md",
     "changelog/2026-09-19-native-enable-after-recovery.md",
+    "changelog/2026-09-26-thn-image-alias-repair.md",
     "changelog/README.md",
     "docs/thn-test-release.md",
+    "docs/superpowers/specs/2026-09-26-thn-image-test-alias-repair-design.md",
+    "plan/infrastructure-thn-image-alias-repair-1.md",
     "tests_release/test_release_artifact.py",
     "tests_release/test_test_validation_boundary.py",
     "tests_release/test_thn_image_native_recovery.py",
     "tests_release/test_thn_image_recovery.py",
+    "tests_release/test_thn_image_alias_patch.py",
+    "tests_release/test_thn_release_guards.py",
     "tests_release/test_thn_test_release.py",
     "tools/thn_image_recovery.py",
+    "tools/thn_image_alias_patch.py",
     "tools/thn_test_release.py",
 })
 DISPATCH_OPERATIONS = OPERATIONS | {"resume-create"}
@@ -207,10 +213,16 @@ def recovered_native_enable_template(original: dict, processed: dict, enabled: s
     from tools.thn_image_recovery import APPROVED_BASELINE
     if (enabled != "false" or not isinstance(original, dict) or not isinstance(processed, dict)
             or original != processed
-            or any(key in original for key in ("Transform", "Globals", "Mappings"))
-            or hashlib.sha256(json.dumps(original, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-            != APPROVED_BASELINE["processedSha256"]):
+            or any(key in original for key in ("Transform", "Globals", "Mappings"))):
         raise ReleaseBlocked("recovered_native_enable_baseline_mismatch")
+    digest = hashlib.sha256(json.dumps(original, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+    if digest != APPROVED_BASELINE["processedSha256"]:
+        from tools.thn_image_alias_patch import verify_patched_native
+        try:
+            verify_patched_native(original, processed, APPROVED_BASELINE["versionLogicalId"],
+                                  APPROVED_BASELINE["processedSha256"])
+        except ReleaseBlocked:
+            raise ReleaseBlocked("recovered_native_enable_baseline_mismatch") from None
     verify_private_processed(original)
     return deepcopy(original)
 
@@ -577,7 +589,7 @@ def run_create_release(session: Any, env: dict, template: dict, account: str) ->
 
 def verify_dependencies(session: Any, operation: str, values: dict, account: str) -> str:
     """Read the exact ledger; never mutate writers, epochs, descriptors or Auth."""
-    if operation not in {"enable", "disable"}:
+    if operation not in {"enable", "disable", "alias-patch"}:
         raise ReleaseBlocked("dependency_operation_invalid")
     from boto3.dynamodb.types import TypeDeserializer
     response = session.client("dynamodb", region_name=REGION).get_item(
@@ -593,7 +605,7 @@ def verify_dependencies(session: Any, operation: str, values: dict, account: str
                 or row.get("pk") != "SERVICE_BINDING#test#thn-journal-test-v2" or row.get("sk") != "REGISTRY#V2"
                 or row.get("adminOrigin") != "https://admin-test.thehairnarrative.com"
                 or row.get("cookieNamespace") != "endefiz7dkk635k6di6k"
-                or row.get("writerMode") != "disabled"):
+                or row.get("writerMode") != ("qa-only" if operation == "alias-patch" else "disabled")):
             raise ValueError()
         for key in ("writerEpoch", "registryRevision"):
             value = row.get(key)
@@ -608,7 +620,7 @@ def verify_dependencies(session: Any, operation: str, values: dict, account: str
                 or bindings.get("authoringFunctionArn") != f"arn:aws:lambda:{REGION}:{account}:function:zoolanding-content-hub-test-ThnContentHubV2Authoring"
                 or bindings.get("metadataTableArn") != f"arn:aws:dynamodb:{REGION}:{account}:table/zoolanding-content-hub-test-ThnContentHubV2Metadata"):
             raise ValueError()
-        if operation == "enable":
+        if operation in {"enable", "alias-patch"}:
             if row.get("activationStatus") != "active":
                 raise ValueError()
             cfn = session.client("cloudformation", region_name=REGION)
@@ -734,12 +746,21 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
         verify_runtime(session, initial_inventory, _parameters(before).get(ENABLE) == "true", identity["Account"])
     prefix = f"{STACK}/thn/{env['GITHUB_RUN_ID']}/{env['GITHUB_RUN_ATTEMPT']}/{env['GITHUB_SHA']}"
     reuse_live_template = operation == "enable" and previous.get("Transform") is None
+    patched_native_enable = False
     if reuse_live_template:
         template = recovered_native_enable_template(previous, live_processed, _parameters(before).get(ENABLE))
+        from tools.thn_image_recovery import APPROVED_BASELINE
+        patched_native_enable = (hashlib.sha256(json.dumps(previous, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+                                 != APPROVED_BASELINE["processedSha256"])
     else:
         candidate = previous if operation == "disable" else _package_template(build, env["ARTIFACTS_BUCKET"], prefix)
         template = compose_template(candidate, previous, operation)
     expected_readback = effective_parameters(template, _parameters(before), parameters)
+    def verify_patched_enable_alias() -> None:
+        if patched_native_enable:
+            from tools.thn_image_alias_patch import verify_live_alias_parity
+            verify_live_alias_parity(session, identity["Account"], effective)
+    verify_patched_enable_alias()
     serialized = json.dumps(template, sort_keys=True, separators=(",", ":")).encode()
     name = f"thn-{env['GITHUB_RUN_ID']}-{env['GITHUB_RUN_ATTEMPT']}"
     arguments = {"StackName": STACK, "ChangeSetName": name, "ChangeSetType": "UPDATE",
@@ -781,6 +802,7 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
         if decision == "noop":
             _verify_retained_state(session, initial_inventory, template, identity["Account"])
             verify_runtime(session, initial_inventory, effective[ENABLE] == "true", identity["Account"])
+            verify_patched_enable_alias()
             if dependency_proof is not None and verify_dependencies(session, operation, effective, identity["Account"]) != dependency_proof:
                 raise ReleaseBlocked("registry_changed_during_review")
             return {"operation": operation, "decision": "noop", "retained_state_verified": True}
@@ -793,6 +815,7 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
             raise ReleaseBlocked("stack_changed_during_review")
         if dependency_proof is not None and verify_dependencies(session, operation, effective, identity["Account"]) != dependency_proof:
             raise ReleaseBlocked("registry_changed_during_review")
+        verify_patched_enable_alias()
         cfn.execute_change_set(StackName=STACK, ChangeSetName=change_id, ClientRequestToken=name)
         executed = True
         cfn.get_waiter("stack_update_complete").wait(StackName=STACK, WaiterConfig={"Delay": 10, "MaxAttempts": 180})
@@ -819,6 +842,7 @@ def run_release(session: Any, env: dict, build: Path, operation: str) -> dict:
                 raise ReleaseBlocked("disabled_routes_still_present")
             _verify_retained_state(session, inventory, template, identity["Account"])
             verify_runtime(session, inventory, effective[ENABLE] == "true", identity["Account"])
+            verify_patched_enable_alias()
             if dependency_proof is not None and verify_dependencies(session, operation, effective, identity["Account"]) != dependency_proof:
                 raise ReleaseBlocked("registry_changed_during_release")
         return {"operation": operation, "decision": "executed", "retained_state_verified": True,
