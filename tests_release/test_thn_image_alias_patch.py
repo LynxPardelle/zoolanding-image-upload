@@ -1,5 +1,6 @@
 """Contracts for the exact native THN TEST Image alias repair."""
 
+from collections import OrderedDict
 from copy import deepcopy
 import base64
 import hashlib
@@ -158,6 +159,13 @@ class AliasPatchTests(unittest.TestCase):
         with patch.object(release, "verify_processed"):
             subject._review(description, change_id, "thn-alias-123-1", baseline,
                             candidate, old_id, new_id, inputs, cfn)
+        ordered_candidate = json.loads(json.dumps(candidate), object_pairs_hook=OrderedDict)
+        sorted_readback = json.loads(json.dumps(candidate, sort_keys=True), object_pairs_hook=OrderedDict)
+        self.assertNotEqual(ordered_candidate, sorted_readback)
+        cfn = SimpleNamespace(get_template=lambda **kwargs: {"TemplateBody": deepcopy(sorted_readback)})
+        with patch.object(release, "verify_processed"):
+            subject._review(description, change_id, "thn-alias-123-1", baseline,
+                            ordered_candidate, old_id, new_id, inputs, cfn)
         changed = deepcopy(candidate)
         changed["Description"] = "private-value-must-not-leak"
         cfn = SimpleNamespace(get_template=lambda **kwargs: {"TemplateBody": deepcopy(changed)})
