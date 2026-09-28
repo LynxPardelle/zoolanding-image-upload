@@ -25,13 +25,15 @@ from private_upload_v2_pipeline import (
 )
 from zoolanding_lambda_common import get_request_id, get_s3_client, get_table, log
 
-ENVIRONMENT = "test"
+from thn_environment_profile import PROFILE
+
+ENVIRONMENT = PROFILE["environment"]
 CANONICAL_DOMAIN = "thehairnarrative.com"
 AUTH_PROFILE_ID = "journal-owner"
 HUB_ID = "thehairnarrative-com-journal"
-SERVICE_BINDING_ID = "thn-journal-test-v2"
-FUNCTION_NAME = "zoolanding-image-upload-test-ThnImageUploadV2"
-AUTHORING_ROLE_NAME = "zlp-thn-ch-test-authoring"
+SERVICE_BINDING_ID = PROFILE["serviceBindingId"]
+FUNCTION_NAME = ("zoolanding-image-upload-test-ThnImageUploadV2" if ENVIRONMENT=="test" else "zoolanding-image-upload-production-ThnImageUploadV2")
+AUTHORING_ROLE_NAME = ("zlp-thn-ch-test-authoring" if ENVIRONMENT=="test" else "zlp-thn-ch-production-authoring")
 OPERATION = "processPrivateImageV2"
 TRANSACTION_RECORD_TYPE = "thn-private-upload-transaction-v2"
 REGISTRY_RECORD_TYPE = "service-binding-registry-v2"
@@ -145,7 +147,7 @@ def _settings(*, allow_test_defaults: bool) -> dict[str, str]:
         "descriptorSha256": os.getenv("THN_CONTENT_HUB_DESCRIPTOR_SHA256", ""),
         "authPolicyVersion": os.getenv("THN_CONTENT_HUB_AUTH_POLICY_VERSION", ""),
     }
-    if allow_test_defaults:
+    if allow_test_defaults and ENVIRONMENT == "test":
         values = {key: value or defaults[key] for key, value in values.items()}
     if (
         not _SAFE_ID.fullmatch(values["descriptorVersionId"])
@@ -228,7 +230,7 @@ def _decode_and_validate_event(
         _require_string(scope.get(field), field, safe_id=True)
     if scope.get("locale") not in {"en", "es"}:
         raise _RequestError("invalid_request", "locale is invalid")
-    if scope.get("actorPurpose") not in {"client-owner", "qa"}:
+    if scope.get("actorPurpose") not in ({"client-owner", "qa"} if ENVIRONMENT=="test" else {"client-owner"}):
         raise _RequestError("invalid_request", "actorPurpose is invalid")
     if scope.get("contentType") not in ALLOWED_CONTENT_TYPES:
         raise _RequestError("invalid_request", "contentType is invalid")

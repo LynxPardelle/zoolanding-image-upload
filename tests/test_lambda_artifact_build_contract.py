@@ -19,6 +19,7 @@ class LambdaArtifactBuildContractTests(unittest.TestCase):
         expected = {
             "ImageUploadFunction": {"lambda_function.py", "zoolanding_lambda_common.py"},
             "ThnPrivateImageUploadV2Function": {
+                "thn_environment_profile.py",
                 "private_upload_v2.py", "private_upload_v2_pipeline.py", "zoolanding_lambda_common.py",
             },
         }
@@ -78,7 +79,12 @@ class LambdaArtifactBuildContractTests(unittest.TestCase):
 
     def test_pillow_floor_excludes_versions_with_known_artifact_vulnerabilities(self):
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-        self.assertEqual(requirements.strip(), "Pillow>=12.3,<13")
+        import re
+        pinned=re.fullmatch(r"Pillow==([0-9]+)\.([0-9]+)\.([0-9]+)", requirements.strip())
+        self.assertIsNotNone(pinned, "production image packages require an immutable version")
+        version=tuple(int(v) for v in pinned.groups())
+        self.assertGreaterEqual(version,(12,3,0))
+        self.assertLess(version,(13,0,0))
 
 
 if __name__ == "__main__":

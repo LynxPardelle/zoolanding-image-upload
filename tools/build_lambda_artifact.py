@@ -13,6 +13,7 @@ REPOSITORY_ROOT = pathlib.Path(__file__).resolve().parents[1]
 SOURCE_ALLOWLIST = {
     "ImageUploadFunction": ("lambda_function.py", "zoolanding_lambda_common.py"),
     "ThnPrivateImageUploadV2Function": (
+        "thn_environment_profile.py",
         "private_upload_v2.py", "private_upload_v2_pipeline.py", "zoolanding_lambda_common.py",
     ),
 }

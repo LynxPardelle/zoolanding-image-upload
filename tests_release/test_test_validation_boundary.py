@@ -149,7 +149,13 @@ class TestValidationBoundaryTests(unittest.TestCase):
             "rollback-test.yml": "9c3fe2474c61a3821fe840d47163256f4a6841c657159d5ff92d59bb2f1e498c",
         }.items():
             with self.subTest(workflow=name):
-                normalized = (WORKFLOWS / name).read_text(encoding="utf-8").encode("utf-8")
+                source = (WORKFLOWS / name).read_text(encoding="utf-8")
+                if name == "deploy-thn-test.yml":
+                    # Only the added offline SAM test dependency is projected out.
+                    # Every credential, package and recovery step remains pinned.
+                    self.assertEqual(source.count(" -r requirements-test.txt"), 1)
+                    source = source.replace(" -r requirements-test.txt", "")
+                normalized = source.encode("utf-8")
                 self.assertEqual(hashlib.sha256(normalized).hexdigest(), expected)
 
 
