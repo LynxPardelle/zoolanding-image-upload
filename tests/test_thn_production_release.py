@@ -21,6 +21,49 @@ class SimulationFingerprintTests(unittest.TestCase):
         self.assertNotEqual(sha(stable),sha(stable_simulation_evaluations([changed_policy])))
 
 class RetainedProductionReleaseTests(unittest.TestCase):
+    def test_sealing_recovery_code_does_not_change_review_baseline(self):
+        from tools import run_thn_production_release as driver
+        from tools.thn_production_release import sha
+
+        baseline = {'original': {'Resources': {'ImageUploadFunction': {
+            'Type': 'AWS::Lambda::Function', 'Properties': {
+                'Code': {'S3Bucket': 'legacy', 'S3Key': 'published.zip'}}}}}}
+        baseline_digest = sha(baseline)
+        recovery = driver.recovery_original_from_baseline(baseline)
+        recovery['Resources']['ImageUploadFunction']['Properties']['Code'] = {
+            'S3Bucket': 'release', 'S3Key': 'recovery/ImageUploadFunction.zip', 'S3ObjectVersion': 'v1'}
+
+        self.assertEqual(sha(baseline), baseline_digest)
+
+    def test_state_candidate_keeps_public_code_when_recovery_seals_baseline(self):
+        from tools import run_thn_production_release as driver
+
+        original = {'Resources': {
+            'ImageUploadFunction': {'Type': 'AWS::Lambda::Function', 'Properties': {
+                'Code': {'S3Bucket': 'legacy', 'S3Key': 'published.zip'}}},
+            'ImageUploadApi': {'Type': 'AWS::ApiGateway::RestApi', 'Properties': {
+                'Body': {'paths': {'/upload': {'post': {}}}}}},
+        }, 'Parameters': {'LegacyMode': {'Type': 'String', 'Default': 'stable'}}}
+        baseline = {'original': original}
+        candidate = {'Resources': {
+            'ImageUploadFunction': {'Type': 'AWS::Serverless::Function', 'Properties': {'CodeUri': 'new.zip'}},
+            'ImageUploadApi': {'Type': 'AWS::Serverless::Api', 'Properties': {}},
+            'ThnPrivateImageUploadV2Function': {'Type': 'AWS::Serverless::Function', 'Properties': {}},
+        }, 'Parameters': {'LegacyMode': {'Type': 'String', 'Default': 'changed'}}}
+
+        selected = driver.candidate_for_scope(candidate, baseline, 'state')
+        # The review later rewrites the historical template to a sealed recovery
+        # ZIP. That rewrite must never alter the selected production candidate.
+        original['Resources']['ImageUploadFunction']['Properties']['Code'] = {
+            'S3Bucket': 'release', 'S3Key': 'recovery/ImageUploadFunction.zip', 'S3ObjectVersion': 'v1'}
+        original['Resources']['ImageUploadApi']['Properties']['Body']['paths']['/upload']['post']['changed'] = True
+
+        self.assertEqual(selected['Resources']['ImageUploadFunction']['Properties']['Code'],
+            {'S3Bucket': 'legacy', 'S3Key': 'published.zip'})
+        self.assertEqual(selected['Resources']['ImageUploadApi']['Properties']['Body'],
+            {'paths': {'/upload': {'post': {}}}})
+        self.assertEqual(selected['Parameters']['LegacyMode']['Default'], 'stable')
+
     def record(self):
         return make_review_record(service='auth',purpose='state',source_sha='a'*40,stack_id='arn:aws:cloudformation:us-east-1:765932874577:stack/zoolanding-auth-admin-prod/id',change_set_arn='arn:aws:cloudformation:us-east-1:765932874577:changeSet/thn-production-auth-state/id',created_at=1000,baseline={'resources':[]},original={'Resources':{}},processed={'Resources':{}},parameters=[],packages=[{'bucket':'bucket','key':'key','versionId':'v1','sha256':'b'*64}],changes=[],recovery=[])
     def test_sealed_exact_review_all_fields_and_expiry(self):
