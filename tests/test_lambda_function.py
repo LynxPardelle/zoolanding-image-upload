@@ -48,7 +48,7 @@ def grant_item(token, **overrides):
         "tokenHash": token_hash,
         "grantId": token_hash[:12],
         "status": "active",
-        "domain": "pamelabetancourt.com",
+        "domain": "example.com",
         "allowedAssetKinds": ["images", "hero-images"],
         "allowedPageIds": ["*"],
         "allowedContentTypes": ["image/gif", "image/png", "image/jpeg", "image/webp"],
@@ -74,7 +74,7 @@ class ImageUploadGrantTests(unittest.TestCase):
     def test_presign_requires_upload_grant(self):
         with patch.object(target, "_emit_denied_metric") as metric:
             response = target.lambda_handler(api_event({
-                "domain": "pamelabetancourt.com",
+                "domain": "example.com",
                 "pageId": "shared",
                 "assetKind": "images",
                 "assetId": "hero",
@@ -91,7 +91,7 @@ class ImageUploadGrantTests(unittest.TestCase):
         table = FakeGrantTable()
         event = {
             "action": "issueUploadGrant",
-            "domain": "pamelabetancourt.com",
+            "domain": "example.com",
             "allowedAssetKinds": ["images"],
             "usageLimit": 3,
             "issuedBy": "test-admin",
@@ -104,7 +104,7 @@ class ImageUploadGrantTests(unittest.TestCase):
         self.assertIn("token", body)
         self.assertEqual(len(table.put_items), 1)
         stored = table.put_items[0]
-        self.assertEqual(stored["domain"], "pamelabetancourt.com")
+        self.assertEqual(stored["domain"], "example.com")
         self.assertEqual(stored["usageLimit"], 3)
         self.assertNotIn(body["token"], json.dumps(stored))
 
@@ -113,7 +113,7 @@ class ImageUploadGrantTests(unittest.TestCase):
             patch.object(target, "_emit_denied_metric"):
             response = target.lambda_handler(api_event({
                 "action": "issueUploadGrant",
-                "domain": "pamelabetancourt.com",
+                "domain": "example.com",
                 "allowedAssetKinds": ["images"],
             }), context())
 
@@ -133,7 +133,7 @@ class ImageUploadGrantTests(unittest.TestCase):
             patch.object(target, "object_exists", return_value=False), \
             patch.object(target, "put_bytes_to_s3", side_effect=put_bytes):
             response = target.lambda_handler(api_event({
-                "domain": "pamelabetancourt.com",
+                "domain": "example.com",
                 "pageId": "shared",
                 "assetKind": "images",
                 "assetId": "hero",
@@ -143,7 +143,7 @@ class ImageUploadGrantTests(unittest.TestCase):
             }, headers={"Authorization": f"Bearer {token}"}), context())
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(uploaded["key"], "pamelabetancourt.com/shared/images/hero.gif")
+        self.assertEqual(uploaded["key"], "example.com/shared/images/hero.gif")
         self.assertEqual(uploaded["payload"], b"gif-bytes")
         self.assertEqual(len(table.update_calls), 1)
 
@@ -161,7 +161,7 @@ class ImageUploadGrantTests(unittest.TestCase):
             patch.object(target, "Image", None), \
             patch.object(target, "ImageOps", None):
             response = target.lambda_handler(api_event({
-                "domain": "pamelabetancourt.com",
+                "domain": "example.com",
                 "pageId": "shared",
                 "assetKind": "images",
                 "assetId": "hero",
@@ -171,7 +171,7 @@ class ImageUploadGrantTests(unittest.TestCase):
             }, headers={"Authorization": f"Bearer {token}"}), context())
 
         self.assertEqual(response["statusCode"], 200)
-        self.assertEqual(uploaded["key"], "pamelabetancourt.com/shared/images/hero.jpg")
+        self.assertEqual(uploaded["key"], "example.com/shared/images/hero.jpg")
         self.assertEqual(uploaded["payload"], b"jpeg-bytes")
         self.assertIn("pillow-unavailable", response["body"])
 
@@ -181,7 +181,7 @@ class ImageUploadGrantTests(unittest.TestCase):
         with patch.object(target, "get_table", return_value=table), \
             patch.object(target, "_emit_denied_metric") as metric:
             response = target.lambda_handler(api_event({
-                "domain": "pamelabetancourt.com",
+                "domain": "example.com",
                 "pageId": "shared",
                 "assetKind": "images",
                 "assetId": "hero",
@@ -200,7 +200,7 @@ class ImageUploadGrantTests(unittest.TestCase):
         with patch.object(target, "get_table", return_value=table), \
             patch.object(target, "object_exists", return_value=True):
             response = target.lambda_handler(api_event({
-                "domain": "pamelabetancourt.com",
+                "domain": "example.com",
                 "pageId": "shared",
                 "assetKind": "images",
                 "assetId": "hero",
