@@ -10,3 +10,4 @@ Chronological implementation, QA, and release evidence lives here. Use the repos
 - [2026-09-10 — Credential-free TEST source promotion](2026-09-10-test-validation-only.md)
 - [2026-09-10 — Private CREATE transport metadata comparison](2026-09-10-private-create-transport-metadata.md)
 - [2026-09-19 — Native enable after sealed Image TEST recovery](2026-09-19-native-enable-after-recovery.md)
+- [2026-11-11 — Public image upload release path](2026-11-11-public-upload-release.md)

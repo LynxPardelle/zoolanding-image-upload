@@ -64,30 +64,12 @@ manual TEST execution. Production, runtime code, SAM templates, the dedicated
 private workflow and historical rollback guards are unchanged. No shared v1
 upload resources are created by promoting source to TEST.
 
-The existing general uploader deployment commands below are **not** the private
-THN TEST activation path:
+### Public uploader production releases
 
-```bash
-sam deploy
-```
-
-The checked-in `samconfig.toml` already targets `us-east-1` with the correct stack name and parameter overrides.
-
-Production deploys should pass abuse-notification email endpoints as stack parameters at deploy time. Do not write operator email addresses into committed config.
-
-The current non-interactive deployment shape is:
-
-```bash
-sam deploy --stack-name zoolanding-image-upload --region us-east-1 --capabilities CAPABILITY_IAM --resolve-s3 --no-confirm-changeset --no-fail-on-empty-changeset --parameter-overrides PublicFilesBucketName=zoolandingpage-public-files PublicFilesBaseUrl=https://assets.zoolandingpage.com.mx PresignExpirationSeconds=900 UploadGrantsTableName=zoolanding-image-upload-grants UploadGrantDefaultExpiresSeconds=28800 UploadGrantMaxExpiresSeconds=86400 UploadGrantDefaultMaxBytes=5242880 UploadGrantMaxBytes=15728640 UploadGrantDefaultUsageLimit=25 UploadGrantMaxUsageLimit=500 AbuseMetricNamespace=Zoolanding/ImageUpload UploadGrantDeniedAlarmThreshold=5 AbuseNotificationEmail1=<operator-email-1> AbuseNotificationEmail2=<operator-email-2> PublicFileCacheControl=public,max-age=31536000,immutable LogLevel=INFO
-```
-
-If you later place CloudFront or another CDN in front of the bucket, set `PublicFilesBaseUrl` to that public origin instead.
-
-Current deployed endpoint:
-
-```text
-https://sots05zp69.execute-api.us-east-1.amazonaws.com/Prod/image-upload/presign
-```
+The public uploader uses its [own code release procedure](docs/public-upload-release.md).
+It stores versioned packages in a dedicated bucket and permits only an in-place
+update of the public Lambda's code in the current CloudFormation stack. The
+private THN release workflow remains a separate procedure.
 
 ## Manual smoke test
 
